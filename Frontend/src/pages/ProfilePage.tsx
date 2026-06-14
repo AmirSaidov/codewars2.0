@@ -1,32 +1,43 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ImagePlus, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 import type { Page } from '../App';
 import { authApi } from '../api';
+import type { UserProfile } from '../api';
 import { useAuth } from '../context/contexts';
 
 interface Props {
   navigate: (p: Page, roomId?: string | number) => void;
 }
 
-const readFileAsDataUrl = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Failed to read image'));
-    reader.readAsDataURL(file);
-  });
+const getProfileValue = (user: UserProfile | null | undefined, key: 'avatar' | 'bio' | 'display_name') =>
+  user?.profile?.[key] || user?.[key] || '';
+
+const buildProfileForm = (user: UserProfile | null | undefined) => ({
+  username: user?.username || '',
+  email: user?.email || '',
+  first_name: user?.first_name || '',
+  last_name: user?.last_name || '',
+  display_name: getProfileValue(user, 'display_name'),
+  bio: getProfileValue(user, 'bio'),
+  avatar: getProfileValue(user, 'avatar'),
+});
+
+const isValidAvatarUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 const ProfilePage: React.FC<Props> = ({ navigate }) => {
   const { user, updateUser, logout } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [form, setForm] = useState({
-    username: user?.username || '',
-    email: user?.email || '',
-    first_name: user?.first_name || '',
-    last_name: user?.last_name || '',
-    bio: user?.bio || '',
-    avatar: user?.avatar || '',
-  });
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const [form, setForm] = useState(() => buildProfileForm(user as UserProfile | null));
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -40,70 +51,60 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
     if (!user?.token) logout();
   }, [logout, user?.token]);
 
-  if (!user?.token) return null;
-
-  const persistLocalProfile = () => {
-    const localUser = {
-      ...user,
-      username: form.username.trim(),
-      email: form.email.trim(),
-      first_name: form.first_name.trim(),
-      last_name: form.last_name.trim(),
-      bio: form.bio,
-      avatar: form.avatar,
-      token: user.token,
-    };
-    updateUser(localUser);
-    return localUser;
-  };
-
-  const onPickAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Choose an image file for avatar');
-      return;
-    }
-    if (file.size > 1_500_000) {
-      setError('Avatar is too large. Keep it under 1.5 MB');
-      return;
-    }
+  useEffect(() => {
+    if (!user?.token) return;
+    let cancelled = false;
+    setLoading(true);
     setError('');
-    const dataUrl = await readFileAsDataUrl(file);
-    setForm((current) => ({ ...current, avatar: dataUrl }));
-  };
+    authApi.me()
+      .then((freshUser) => {
+        if (cancelled) return;
+        const nextUser = { ...freshUser, token: user.token };
+        updateUser(nextUser);
+        setForm(buildProfileForm(nextUser));
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load profile');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [user?.token]);
+
+  if (!user?.token) return null;
 
   const handleSave = async () => {
     if (!form.username.trim() || !form.email.trim()) {
       setError('Username and email are required');
       return;
     }
+    if (!isValidAvatarUrl(form.avatar)) {
+      setError('Avatar must be a valid http(s) URL');
+      return;
+    }
     setSaving(true);
     setError('');
     setSuccess('');
-    const localUser = persistLocalProfile();
     try {
       const updated = await authApi.updateMe({
         username: form.username.trim(),
         email: form.email.trim(),
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
-        bio: form.bio,
-        avatar: form.avatar,
+        profile: {
+          display_name: form.display_name.trim(),
+          bio: form.bio,
+          avatar: form.avatar.trim(),
+        },
       });
-      updateUser({ ...localUser, ...updated, token: user.token });
-      setForm({
-        username: updated.username,
-        email: updated.email,
-        first_name: updated.first_name || '',
-        last_name: updated.last_name || '',
-        bio: updated.bio || '',
-        avatar: updated.avatar || '',
-      });
+      const nextUser = { ...updated, token: user.token };
+      updateUser(nextUser);
+      setForm(buildProfileForm(nextUser));
       setSuccess('Profile saved');
-    } catch (saveError: any) {
-      setSuccess('Profile saved locally');
-      setError(saveError?.message || 'Server save failed, local profile kept');
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save profile');
     } finally {
       setSaving(false);
     }
@@ -129,6 +130,11 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
 
       <div className="container profile-shell" style={{ paddingTop: 40, paddingBottom: 40, display: 'grid', gap: 24 }}>
         <div className="card card-glow profile-card-grid" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
+          {loading && (
+            <div style={{ gridColumn: '1 / -1', color: 'var(--text-secondary)', fontFamily: 'var(--font-display)', letterSpacing: 2 }}>
+              LOADING PROFILE...
+            </div>
+          )}
           <div style={{ display: 'grid', justifyItems: 'center', alignContent: 'start', gap: 16 }}>
             <div
               style={{
@@ -154,18 +160,8 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
               )}
             </div>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={onPickAvatar}
-            />
-
-            <button className="btn btn-ghost btn-sm" onClick={() => fileInputRef.current?.click()}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <ImagePlus size={14} /> CHANGE AVATAR
-              </span>
+            <button className="btn btn-ghost btn-sm" onClick={() => avatarInputRef.current?.focus()}>
+              AVATAR URL
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setForm((current) => ({ ...current, avatar: '' }))}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -201,6 +197,23 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
               <div className="form-group">
                 <label className="label">Last name</label>
                 <input className="input" value={form.last_name} onChange={(e) => setForm((current) => ({ ...current, last_name: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="profile-field-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="form-group">
+                <label className="label">Display name</label>
+                <input className="input" value={form.display_name} onChange={(e) => setForm((current) => ({ ...current, display_name: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="label">Avatar URL</label>
+                <input
+                  ref={avatarInputRef}
+                  className="input"
+                  value={form.avatar}
+                  onChange={(e) => setForm((current) => ({ ...current, avatar: e.target.value }))}
+                  placeholder="https://example.com/avatar.png"
+                />
               </div>
             </div>
 

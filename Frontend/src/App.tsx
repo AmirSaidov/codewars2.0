@@ -9,6 +9,7 @@ import BattleArenaPage from './pages/BattleArenaPage';
 import TournamentPage from './pages/TournamentPage';
 import { AdminPanelPage, MatchResultsPage, ThemeSettingsPage } from './pages/OtherPages';
 import ProfilePage from './pages/ProfilePage';
+import { authApi, getValidAccessToken } from './api';
 
 export type Page =
   | 'landing'
@@ -82,6 +83,7 @@ const App: React.FC = () => {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [wsMessages, setWsMessages] = useState<any[]>([]);
   const [ws, setWs] = useState<WebSocket | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const applyRouteState = (p: Page, rid?: string | number | null) => {
     const normalizedRoomId = normalizeRoomId(rid);
@@ -107,15 +109,15 @@ const App: React.FC = () => {
 
   const login = (u: User) => {
     setUser(u);
-    localStorage.setItem('cz_user', JSON.stringify(u));
     if (u.token) localStorage.setItem('cz_token', u.token);
+    localStorage.removeItem('cz_user');
     navigate('dashboard');
   };
 
   const updateUser = (u: User) => {
     setUser(u);
-    localStorage.setItem('cz_user', JSON.stringify(u));
     if (u.token) localStorage.setItem('cz_token', u.token);
+    localStorage.removeItem('cz_user');
   };
 
   const clearSession = () => {
@@ -140,18 +142,46 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem('cz_user');
-    if (stored) {
+    const legacyStoredUser = localStorage.getItem('cz_user');
+    if (legacyStoredUser && !localStorage.getItem('cz_token')) {
       try {
-        const parsed = JSON.parse(stored) as User;
-        setUser(parsed);
-        if (!localStorage.getItem('cz_token') && parsed?.token) {
+        const parsed = JSON.parse(legacyStoredUser) as User;
+        if (parsed?.token) {
           localStorage.setItem('cz_token', parsed.token);
         }
       } catch {
-        localStorage.removeItem('cz_user');
+        // ignore malformed legacy auth data
       }
     }
+    localStorage.removeItem('cz_user');
+
+    const existingToken = localStorage.getItem('cz_token');
+    if (existingToken) {
+      setUser({
+        id: '',
+        username: '',
+        email: '',
+        token: existingToken,
+      });
+      void getValidAccessToken(existingToken)
+        .then(async (token) => {
+          if (!token) {
+            clearSession();
+            setPage('login');
+            return;
+          }
+          const me = await authApi.me();
+          setUser({ ...me, token });
+        })
+        .catch(() => {
+          clearSession();
+          setPage('login');
+        })
+        .finally(() => setAuthReady(true));
+    } else {
+      setAuthReady(true);
+    }
+
     const storedTheme = localStorage.getItem('cz_theme') as Theme;
     if (storedTheme) setTheme(storedTheme);
 
@@ -163,7 +193,7 @@ const App: React.FC = () => {
     const routeState = parseRoute();
     if (routeState) {
       const targetRoomId = normalizeRoomId(routeState.roomId) ?? normalizedStoredRoomId;
-      if (protectedPages.includes(routeState.page) && !stored) {
+      if (protectedPages.includes(routeState.page) && !existingToken) {
         setPage('login');
       } else if (roomPages.includes(routeState.page) && !targetRoomId) {
         setPage('dashboard');
@@ -175,14 +205,14 @@ const App: React.FC = () => {
 
     const storedPage = localStorage.getItem('cz_page') as Page | null;
     if (storedPage) {
-      if (protectedPages.includes(storedPage) && !stored) {
+      if (protectedPages.includes(storedPage) && !existingToken) {
         setPage('landing');
       } else if (roomPages.includes(storedPage) && !normalizedStoredRoomId) {
         setPage('dashboard');
       } else {
         setPage(storedPage);
       }
-    } else if (stored) {
+    } else if (existingToken) {
       setPage('dashboard');
     }
   }, []);
@@ -238,7 +268,7 @@ const App: React.FC = () => {
       <AuthContext.Provider value={{ user, login, updateUser, logout }}>
         <WebSocketContext.Provider value={{ ws, setWs, messages: wsMessages, addMessage: (m) => setWsMessages(p => [...p, m]) }}>
           <div data-theme={theme} className="app-root">
-            {renderPage()}
+            {authReady ? renderPage() : null}
           </div>
         </WebSocketContext.Provider>
       </AuthContext.Provider>

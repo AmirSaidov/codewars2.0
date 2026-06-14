@@ -42,6 +42,18 @@ const normalizeTournamentStatus = (value: unknown, fallback: TournamentPlayerSta
   return fallback;
 };
 
+const sortTournamentPlayers = (items: RoomTournamentPlayer[]) => (
+  [...items].sort((a, b) => {
+    if (a.is_winner && !b.is_winner) return -1;
+    if (!a.is_winner && b.is_winner) return 1;
+    if (a.is_eliminated && !b.is_eliminated) return 1;
+    if (!a.is_eliminated && b.is_eliminated) return -1;
+    if ((a.points ?? 0) !== (b.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
+    if ((a.solved_count ?? 0) !== (b.solved_count ?? 0)) return (b.solved_count ?? 0) - (a.solved_count ?? 0);
+    return (a.total_solution_time ?? 0) - (b.total_solution_time ?? 0);
+  })
+);
+
 const getMessageKey = (message: RoomChatMessage) => {
   if (message.id !== undefined && message.id !== null) return `id:${message.id}`;
   return [
@@ -188,6 +200,7 @@ const TournamentPage: React.FC<Props> = ({ navigate, user, roomId }) => {
 
     upsertTournamentPlayer(userId, (current) => {
       const nextLevel = clampRoundLevel(getPayloadNumber(data, 'round_level') ?? ((current?.round_level ?? currentRound) + 1));
+      const solvedCount = getPayloadNumber(data, 'solved_count') ?? Math.max(current?.solved_count ?? 0, nextLevel - 1);
       return {
         user_id: userId,
         username: String(data.username || current?.username || `Player ${userId}`),
@@ -195,9 +208,9 @@ const TournamentPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         round_level: nextLevel,
         is_winner: false,
         is_eliminated: false,
-        points: current?.points,
-        solved_count: current?.solved_count,
-        total_solution_time: current?.total_solution_time,
+        points: getPayloadNumber(data, 'points') ?? current?.points,
+        solved_count: solvedCount,
+        total_solution_time: getPayloadNumber(data, 'total_solution_time') ?? current?.total_solution_time,
       };
     });
   }, [currentRound, upsertTournamentPlayer]);
@@ -234,8 +247,9 @@ const TournamentPage: React.FC<Props> = ({ navigate, user, roomId }) => {
 
         const existing = byId.get(userId);
         const solvedCount = getPayloadNumber(item, 'solved_count') ?? existing?.solved_count ?? 0;
-        const eliminated = item.eliminated === true || item.player_status === 'eliminated';
-        const winner = item.player_status === 'winner';
+        const playerStatus = String(item.player_status || '');
+        const eliminated = item.eliminated === true || playerStatus === 'eliminated' || playerStatus === 'left';
+        const winner = playerStatus === 'winner';
         const level = winner
           ? 5
           : eliminated
@@ -280,11 +294,44 @@ const TournamentPage: React.FC<Props> = ({ navigate, user, roomId }) => {
     setMatchStatus('finished');
     if (!winnerId) return;
 
-    setPlayers((current) => current.map((player) => (
-      player.user_id === winnerId
-        ? { ...player, username: String(data.username || player.username), status: 'winner', round_level: 5, is_winner: true, is_eliminated: false }
-        : { ...player, status: 'eliminated', is_winner: false, is_eliminated: true }
-    )));
+    setPlayers((current) => {
+      let foundWinner = false;
+      const nextPlayers = current.map((player) => {
+        if (player.user_id === winnerId) {
+          foundWinner = true;
+          return {
+            ...player,
+            username: String(data.username || player.username),
+            status: 'winner' as const,
+            round_level: 5,
+            is_winner: true,
+            is_eliminated: false,
+          };
+        }
+        return {
+          ...player,
+          status: 'eliminated' as const,
+          is_winner: false,
+          is_eliminated: true,
+        };
+      });
+
+      if (!foundWinner) {
+        nextPlayers.unshift({
+          user_id: winnerId,
+          username: String(data.username || `Player ${winnerId}`),
+          status: 'winner',
+          round_level: 5,
+          is_winner: true,
+          is_eliminated: false,
+          points: 0,
+          solved_count: 0,
+          total_solution_time: 0,
+        });
+      }
+
+      return nextPlayers;
+    });
   }, []);
 
   const handleWSEvent = useCallback((event: WSEvent) => {
@@ -342,6 +389,7 @@ const TournamentPage: React.FC<Props> = ({ navigate, user, roomId }) => {
       onForbidden: () => setChatError('Realtime room access denied.'),
       onAuthInvalid: () => setChatError('Realtime auth failed. Refreshing session...'),
     },
+    { enabled: Boolean(roomId && !loading && !error) },
   );
 
   const mountainPlayers: TournamentPlayer[] = useMemo(() => (
@@ -357,16 +405,7 @@ const TournamentPage: React.FC<Props> = ({ navigate, user, roomId }) => {
     }))
   ), [players]);
 
-  const sortedLeaderboard = useMemo(() => (
-    [...players].sort((a, b) => {
-      if (a.is_winner && !b.is_winner) return -1;
-      if (!a.is_winner && b.is_winner) return 1;
-      if (a.is_eliminated && !b.is_eliminated) return 1;
-      if (!a.is_eliminated && b.is_eliminated) return -1;
-      if ((a.points ?? 0) !== (b.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
-      return (a.total_solution_time ?? 0) - (b.total_solution_time ?? 0);
-    })
-  ), [players]);
+  const sortedLeaderboard = useMemo(() => sortTournamentPlayers(players), [players]);
 
   const connectionLabel =
     connectionStatus === 'connected'

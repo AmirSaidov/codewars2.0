@@ -27,6 +27,7 @@ class RoomChatMessageSerializer(serializers.ModelSerializer):
 
 class RoomSerializer(serializers.ModelSerializer):
     creator = UserSerializer(read_only=True)
+    invite_code = serializers.SerializerMethodField()
     players = serializers.SerializerMethodField()
     player_count = serializers.SerializerMethodField()
     current_match = serializers.SerializerMethodField()
@@ -39,6 +40,7 @@ class RoomSerializer(serializers.ModelSerializer):
         model = Room
         fields = [
             'id',
+            'invite_code',
             'name',
             'creator',
             'is_private',
@@ -60,6 +62,9 @@ class RoomSerializer(serializers.ModelSerializer):
     def get_players(self, obj):
         memberships = obj.memberships.select_related('user').filter(status=RoomMembership.Status.ACTIVE)
         return RoomMembershipSerializer(memberships, many=True).data
+
+    def get_invite_code(self, obj):
+        return str(obj.id)
 
     def get_player_count(self, obj):
         return obj.memberships.filter(status=RoomMembership.Status.ACTIVE).exclude(user_id=obj.creator_id).count()

@@ -4,7 +4,7 @@ import type { Page } from '../App';
 import type { User } from '../context/contexts';
 import { adminApi, tasksApi, roomsApi, matchesApi, submissionsApi, matchApi } from '../api';
 import type { Submission, Task, LeaderboardEntry, MatchResult, Room, Match, WSEvent } from '../api';
-import { Award, Crown } from 'lucide-react';
+import { Award, Crown, Trophy } from 'lucide-react';
 import { useRoomWebSocket } from '../hooks/useRoomWebSocket';
 
 interface Props {
@@ -437,7 +437,7 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 900, color: 'var(--accent)', letterSpacing: 2 }}>
-                  {finishedResult.winner?.username || 'UNKNOWN'} WON
+                  {finishedResult.winner ? `${finishedResult.winner.username} WON` : 'NO WINNER'}
                 </div>
                 <div style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
                   {finishedResult.players.length} players • {Math.floor(finishedResult.duration_seconds / 60)}m {finishedResult.duration_seconds % 60}s
@@ -967,7 +967,14 @@ export const MatchResultsPage: React.FC<ResultsProps> = ({ navigate, user, roomI
     navigate('admin', adminRoomId);
   };
 
-  const rankIcon = (r: number) => r === 1 ? <Crown size={22} /> : r === 2 ? <Award size={22} /> : r === 3 ? <Award size={22} /> : `#${r}`;
+  const formatDuration = (seconds: number) => `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const getSolvedCount = (player: MatchResult['players'][number]) =>
+    player.rounds_solved ?? player.solved_count ?? player.solved_rounds ?? 0;
+  const getTotalTime = (player: MatchResult['players'][number]) =>
+    player.total_time ?? player.total_solution_time ?? 0;
+  const rankIcon = (rank: number, isWinner: boolean) => (
+    isWinner ? <Crown size={22} /> : rank <= 3 ? <Award size={22} /> : `#${rank}`
+  );
 
   if (loading) {
     return (
@@ -998,63 +1005,102 @@ export const MatchResultsPage: React.FC<ResultsProps> = ({ navigate, user, roomI
     );
   }
 
+  const winnerId = result.winner?.id ?? null;
+  const standings = [...(result.standings ?? result.players)].sort((a, b) => {
+    const aWinner = winnerId !== null && String(a.id) === String(winnerId);
+    const bWinner = winnerId !== null && String(b.id) === String(winnerId);
+    if (aWinner !== bWinner) return aWinner ? -1 : 1;
+    if (a.is_eliminated !== b.is_eliminated) return a.is_eliminated ? 1 : -1;
+    const solvedDiff = getSolvedCount(b) - getSolvedCount(a);
+    if (solvedDiff !== 0) return solvedDiff;
+    const pointsDiff = (b.points ?? b.score ?? 0) - (a.points ?? a.score ?? 0);
+    if (pointsDiff !== 0) return pointsDiff;
+    const timeDiff = getTotalTime(a) - getTotalTime(b);
+    if (timeDiff !== 0) return timeDiff;
+    return String(a.username).localeCompare(String(b.username));
+  });
+  const championName = result.winner?.username ?? null;
+  const hasWinner = winnerId !== null && championName !== null;
+
   return (
     <div className="page" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24 }}>
-      <div style={{ width: '100%', maxWidth: 600 }} className="fade-in">
-        {/* Winner */}
-        <div style={{ textAlign: 'center', marginBottom: 48 }}>
-          <div style={{ marginBottom: 16, color: 'var(--accent)' }}><Crown size={64} /></div>
+      <div style={{ width: '100%', maxWidth: 720 }} className="fade-in">
+        <div className="card card-glow" style={{ textAlign: 'center', marginBottom: 24, padding: 32 }}>
+          <div style={{ marginBottom: 16, color: hasWinner ? 'var(--accent)' : 'var(--text-secondary)', filter: hasWinner ? 'drop-shadow(0 0 24px var(--accent-glow))' : 'none' }}>
+            {hasWinner ? <Trophy size={68} /> : <Award size={60} />}
+          </div>
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 11, letterSpacing: 4, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            CHAMPION
+            {hasWinner ? 'CHAMPION' : 'NO WINNER'}
           </div>
           <div style={{
-            fontFamily: 'var(--font-display)', fontSize: 42, fontWeight: 900,
-            color: 'var(--accent)', letterSpacing: 4,
-            textShadow: '0 0 40px var(--accent-glow)',
+            fontFamily: 'var(--font-display)', fontSize: 'clamp(28px, 6vw, 42px)', fontWeight: 900,
+            color: hasWinner ? 'var(--accent)' : 'var(--text-primary)', letterSpacing: 4,
+            textShadow: hasWinner ? '0 0 40px var(--accent-glow)' : 'none',
+            overflowWrap: 'anywhere',
           }}>
-            {(result.winner?.username || 'UNKNOWN').toUpperCase()}
+            {(championName ?? 'NO WINNER').toUpperCase()}
           </div>
-          <div style={{ marginTop: 12, fontFamily: 'var(--font-code)', fontSize: 13, color: 'var(--text-secondary)' }}>
-            Match duration: {Math.floor(result.duration_seconds / 60)}m {result.duration_seconds % 60}s
+          {hasWinner && (
+            <div style={{ marginTop: 10, color: 'var(--accent)' }}>
+              <Crown size={28} />
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 20, flexWrap: 'wrap', marginTop: 18, fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)' }}>
+            <span>Duration: {formatDuration(result.duration_seconds)}</span>
+            <span>Players: {result.players_count ?? standings.length}</span>
           </div>
         </div>
 
-        {/* Rankings */}
         <div className="card card-glow" style={{ marginBottom: 24 }}>
           <div className="section-label" style={{ marginBottom: 16 }}>FINAL STANDINGS</div>
-          {result.players.map((p, i) => (
-            <div key={p.id} style={{
-              display: 'flex', alignItems: 'center', gap: 16,
-              padding: '14px 0',
-              borderBottom: i < result.players.length - 1 ? '1px solid var(--border)' : 'none',
-            }}>
-              <div style={{
-                width: 32, fontFamily: 'var(--font-display)', fontSize: 18,
-                textAlign: 'center', flexShrink: 0,
-              }}>
-                {rankIcon(p.final_rank)}
-              </div>
-              <div className="avatar">{p.username[0]}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 2 }}>
-                  {p.username}
-                </div>
-                <div style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                  {p.solved_rounds} round{p.solved_rounds !== 1 ? 's' : ''} solved
-                </div>
-              </div>
-              {p.is_eliminated && <span className="tag tag-danger" style={{ fontSize: 9 }}>ELIMINATED</span>}
-              {!p.is_eliminated && <span className="tag tag-success" style={{ fontSize: 9 }}>WINNER</span>}
+          {standings.length === 0 ? (
+            <div style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)' }}>
+              No players recorded for this match.
             </div>
-          ))}
+          ) : (
+            standings.map((p, i) => {
+              const isWinner = winnerId !== null && String(p.id) === String(winnerId);
+              const solvedCount = getSolvedCount(p);
+              const totalTime = getTotalTime(p);
+              const rank = i + 1;
+              return (
+                <div key={p.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 16,
+                  padding: '14px 0',
+                  borderBottom: i < standings.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{
+                    width: 32, fontFamily: 'var(--font-display)', fontSize: 18,
+                    textAlign: 'center', flexShrink: 0, color: isWinner ? 'var(--accent)' : 'var(--text-secondary)',
+                  }}>
+                    {rankIcon(rank, isWinner)}
+                  </div>
+                  <div className="avatar">{(p.username || '?')[0].toUpperCase()}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 2,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {p.username}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                      {solvedCount} round{solvedCount !== 1 ? 's' : ''} solved - {Math.round(totalTime * 100) / 100}s total
+                    </div>
+                  </div>
+                  {isWinner && <span className="tag tag-success" style={{ fontSize: 9 }}>WINNER</span>}
+                  {!isWinner && p.is_eliminated && <span className="tag tag-danger" style={{ fontSize: 9 }}>ELIMINATED</span>}
+                  {!isWinner && !p.is_eliminated && <span className="tag" style={{ fontSize: 9 }}>{String(p.status || 'finished').toUpperCase()}</span>}
+                </div>
+              );
+            })
+          )}
         </div>
 
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={goLobby}>
             PLAY AGAIN
           </button>
-          <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={goHome}>HOME</button>
-          {(isAdmin || Boolean(roomId && user?.id)) && <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={goAdmin}>ADMIN PANEL</button>}
+          <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={goHome}>BACK TO DASHBOARD</button>
         </div>
       </div>
     </div>

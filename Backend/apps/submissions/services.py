@@ -110,6 +110,8 @@ def accept_submission(admin_user, submission):
             'round_id': submission.round_id,
             'submission_id': submission.id,
             'user_id': submission.user_id,
+            'username': submission.user.get_username(),
+            'status': submission.status,
             'manual': True,
         },
     )
@@ -120,7 +122,7 @@ def accept_submission(admin_user, submission):
 
 @transaction.atomic
 def reject_submission(admin_user, submission):
-    submission = Submission.objects.select_for_update().select_related('match__room').get(pk=submission.pk)
+    submission = Submission.objects.select_for_update().select_related('match__room', 'round', 'user').get(pk=submission.pk)
     _ensure_submission_admin(admin_user, submission)
 
     submission.status = Submission.Status.WRONG_ANSWER
@@ -130,6 +132,19 @@ def reject_submission(admin_user, submission):
     submission.save(update_fields=['status', 'manual_decision', 'moderated_by', 'moderated_at'])
 
     sync_match_leaderboard(submission.match)
+    broadcast_room_event(
+        submission.match.room_id,
+        'solution_rejected',
+        {
+            'match_id': submission.match_id,
+            'round_id': submission.round_id,
+            'submission_id': submission.id,
+            'user_id': submission.user_id,
+            'username': submission.user.get_username(),
+            'status': submission.status,
+            'manual': True,
+        },
+    )
     broadcast_leaderboard(submission.match)
     auto_advance_if_round_reviewed(admin_user, submission.match)
     return submission

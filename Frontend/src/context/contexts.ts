@@ -22,8 +22,16 @@ export interface User {
   email: string;
   first_name?: string;
   last_name?: string;
+  profile?: {
+    avatar: string;
+    bio: string;
+    display_name: string;
+    created_at?: string;
+    updated_at?: string;
+  };
   bio?: string;
   avatar?: string;
+  display_name?: string;
   token: string;
   is_staff?: boolean;
 }

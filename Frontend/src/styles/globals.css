@@ -830,8 +830,8 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   flex: 1;
 }
 .tournament-page-mountain .tournament-mountain-card {
-  min-height: calc(100vh - 148px);
-  height: calc(100vh - 148px);
+  min-height: calc(100vh - 132px);
+  height: calc(100vh - 132px);
 }
 .tournament-page-side {
   min-width: 0;
@@ -902,9 +902,9 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
 
 /* Tournament mountain */
 .tournament-mountain-card {
-  --tournament-node-size: clamp(42px, 3.45vw, 72px);
+  --tournament-node-size: clamp(46px, 3.7vw, 76px);
   --tournament-winner-size: calc(var(--tournament-node-size) * 1.2);
-  --tournament-node-label-width: clamp(68px, 6vw, 128px);
+  --tournament-node-label-width: clamp(78px, 6.4vw, 136px);
   min-height: 75vh;
   padding: clamp(18px, 1.5vw, 28px);
   overflow: hidden;
@@ -955,7 +955,7 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   position: relative;
   flex: 1;
   width: 100%;
-  height: clamp(620px, calc(100vh - 190px), 940px);
+  height: clamp(660px, calc(100vh - 178px), 980px);
   min-height: calc(75vh - 96px);
   min-width: 0;
   overflow: hidden;
@@ -977,28 +977,28 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
 .tournament-mountain-finish-label {
   font-family: var(--font-display);
   font-size: clamp(18px, 1.2vw, 26px);
-  font-weight: 700;
+  font-weight: 900;
   letter-spacing: 6px;
   text-anchor: middle;
-  fill: #3b82f6;
+  fill: #2f78ff;
 }
 .tournament-mountain-finish-line {
-  stroke: rgba(59, 130, 246, 0.6);
-  stroke-width: 2.5px;
+  stroke: rgba(47, 120, 255, 0.82);
+  stroke-width: 3px;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.35));
+  filter: drop-shadow(0 0 8px rgba(47, 120, 255, 0.42));
 }
 .tournament-mountain-zone-line {
-  stroke: rgba(120, 90, 180, 0.16);
+  stroke: rgba(127, 127, 127, 0.18);
   stroke-width: 1px;
-  stroke-dasharray: 4 16;
+  stroke-dasharray: 5 18;
 }
 .tournament-mountain-stage-label,
 .tournament-mountain-stage-count {
   font-family: var(--font-code);
-  font-size: clamp(13px, 0.78vw, 17px);
+  font-size: clamp(12px, 0.74vw, 16px);
   letter-spacing: 3px;
-  fill: rgba(120, 120, 120, 0.72);
+  fill: rgba(150, 160, 178, 0.72);
 }
 .tournament-mountain-stage-count {
   text-anchor: end;
@@ -1010,20 +1010,20 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   vector-effect: non-scaling-stroke;
 }
 .tournament-mountain-route.inactive {
-  stroke: rgba(120, 90, 180, 0.55);
-  stroke-width: clamp(2.5px, 0.22vw, 4px);
-  opacity: 0.72;
+  stroke: rgba(138, 148, 163, 0.5);
+  stroke-width: clamp(2.5px, 0.2vw, 3.5px);
+  opacity: 0.58;
 }
 .tournament-mountain-route.active {
-  stroke: #00e5ff;
-  stroke-width: clamp(3px, 0.3vw, 5.25px);
+  stroke: #2f78ff;
+  stroke-width: clamp(3.25px, 0.32vw, 5.5px);
   opacity: 1;
-  filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.78));
+  filter: drop-shadow(0 0 8px rgba(47, 120, 255, 0.76));
 }
 .tournament-mountain-route.eliminated {
-  stroke: rgba(120, 120, 120, 0.35);
-  stroke-width: clamp(2.5px, 0.22vw, 4px);
-  opacity: 0.85;
+  stroke: rgba(116, 124, 136, 0.32);
+  stroke-width: clamp(2.5px, 0.2vw, 3.5px);
+  opacity: 0.56;
 }
 .tournament-node {
   position: absolute;
@@ -1033,7 +1033,9 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   justify-items: center;
   gap: clamp(5px, 0.45vw, 9px);
   min-width: var(--tournament-node-label-width);
+  max-width: var(--tournament-node-label-width);
   pointer-events: auto;
+  isolation: isolate;
 }
 .tournament-node-avatar {
   width: var(--tournament-node-size);
@@ -1049,6 +1051,8 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   font-weight: 700;
   box-shadow: 0 0 0 clamp(4px, 0.35vw, 7px) rgba(127, 127, 127, 0.05);
   transition: border-color 0.2s, color 0.2s, box-shadow 0.2s, background 0.2s;
+  position: relative;
+  z-index: 2;
 }
 .tournament-node-avatar svg {
   width: 46%;
@@ -1056,6 +1060,7 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
 }
 .tournament-node-name {
   max-width: var(--tournament-node-label-width);
+  width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1066,36 +1071,46 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   line-height: 1.25;
   padding: 1px 5px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 95%, transparent);
+  box-shadow: 0 0 0 1px rgba(127, 127, 127, 0.08);
 }
 .tournament-node.active .tournament-node-avatar {
   border-color: var(--accent);
   color: var(--accent);
 }
 .tournament-node.advanced .tournament-node-avatar {
-  border-color: #00e5ff;
-  color: #00e5ff;
+  border-color: #2f78ff;
+  color: #2f78ff;
   box-shadow:
-    0 0 0 clamp(4px, 0.42vw, 8px) rgba(0, 229, 255, 0.12),
-    0 0 clamp(18px, 1.5vw, 30px) rgba(0, 229, 255, 0.38);
+    0 0 0 clamp(4px, 0.42vw, 8px) rgba(47, 120, 255, 0.14),
+    0 0 clamp(18px, 1.5vw, 30px) rgba(47, 120, 255, 0.42);
 }
 .tournament-node.eliminated {
   filter: grayscale(1);
 }
 .tournament-node.eliminated .tournament-node-avatar {
-  border-color: var(--border);
-  color: var(--text-secondary);
-  background: var(--bg-card);
+  border-color: rgba(120, 120, 120, 0.45);
+  color: rgba(150, 150, 150, 0.82);
+  background: color-mix(in srgb, var(--bg-card) 88%, #666);
+  box-shadow: none;
+}
+.tournament-node.eliminated .tournament-node-name {
+  color: rgba(150, 150, 150, 0.78);
+  text-decoration: line-through;
 }
 .tournament-node.winner .tournament-node-avatar {
   width: var(--tournament-winner-size);
   height: var(--tournament-winner-size);
-  border-color: #00e5ff;
-  color: #00e5ff;
-  background: rgba(0, 229, 255, 0.1);
+  border-color: #2f78ff;
+  color: #2f78ff;
+  background: rgba(47, 120, 255, 0.12);
   box-shadow:
-    0 0 0 clamp(6px, 0.56vw, 11px) rgba(0, 229, 255, 0.14),
-    0 0 clamp(28px, 2.2vw, 46px) rgba(0, 229, 255, 0.48);
+    0 0 0 clamp(6px, 0.56vw, 11px) rgba(47, 120, 255, 0.16),
+    0 0 clamp(30px, 2.4vw, 52px) rgba(47, 120, 255, 0.55);
+}
+.tournament-node.winner .tournament-node-name {
+  color: #2f78ff;
+  font-weight: 700;
 }
 .tournament-node-x {
   position: absolute;
@@ -1109,25 +1124,44 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   background: var(--danger);
   color: #fff;
   border: 1px solid var(--bg-card);
+  z-index: 4;
 }
 .tournament-node-x svg {
   width: 70%;
   height: 70%;
 }
-.tournament-node-badge {
+.tournament-node-crown {
   position: absolute;
-  top: calc(var(--tournament-node-size) * -0.58);
+  top: calc(var(--tournament-node-size) * -0.73);
   left: 50%;
   translate: -50% 0;
-  color: #00e5ff;
+  width: clamp(22px, 1.8vw, 34px);
+  height: clamp(22px, 1.8vw, 34px);
+  display: grid;
+  place-items: center;
+  color: #2f78ff;
+  filter: drop-shadow(0 0 10px rgba(47, 120, 255, 0.7));
+  z-index: 5;
+}
+.tournament-node-crown svg {
+  width: 100%;
+  height: 100%;
+}
+.tournament-node-badge {
+  position: absolute;
+  top: calc(var(--tournament-node-size) * -0.38);
+  left: 50%;
+  translate: -50% 0;
+  color: #2f78ff;
   font-family: var(--font-code);
   font-size: clamp(9px, 0.66vw, 12px);
   letter-spacing: 2px;
+  font-weight: 700;
 }
 
 @media (min-width: 1600px) {
   .tournament-mountain-board {
-    height: clamp(760px, calc(100vh - 170px), 990px);
+    height: clamp(780px, calc(100vh - 154px), 1020px);
   }
 }
 
@@ -1165,8 +1199,8 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
     min-height: 72vh;
   }
   .tournament-mountain-board {
-    height: clamp(560px, 70vh, 760px);
-    min-height: 560px;
+    height: clamp(620px, 74vh, 800px);
+    min-height: 600px;
   }
 }
 
@@ -1216,8 +1250,8 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
     justify-content: center;
   }
   .tournament-mountain-card {
-    --tournament-node-size: clamp(24px, 7vw, 34px);
-    --tournament-node-label-width: 34px;
+    --tournament-node-size: clamp(28px, 7.8vw, 42px);
+    --tournament-node-label-width: clamp(48px, 12vw, 62px);
     min-height: auto;
     padding: 14px;
   }
@@ -1233,8 +1267,8 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
     justify-items: start;
   }
   .tournament-mountain-board {
-    height: clamp(430px, 68vh, 560px);
-    min-height: 430px;
+    height: clamp(500px, 72vh, 640px);
+    min-height: 500px;
   }
   .tournament-mountain-stage-label,
   .tournament-mountain-stage-count {
@@ -1245,11 +1279,16 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
     min-width: var(--tournament-node-label-width);
   }
   .tournament-node-name {
-    display: none;
+    display: block;
+    font-size: 8px;
+    padding-inline: 3px;
   }
   .tournament-node-x {
     top: -2px;
     right: 0;
+  }
+  .tournament-node-crown {
+    top: calc(var(--tournament-node-size) * -0.82);
   }
 
   .mobile-nav {
@@ -1372,6 +1411,15 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   .arena-stat-row {
     flex-wrap: wrap;
     gap: 10px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .tournament-mountain-card {
+    --tournament-node-label-width: 38px;
+  }
+  .tournament-node-name {
+    display: none;
   }
 }
 

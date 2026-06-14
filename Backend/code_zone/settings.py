@@ -38,7 +38,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'channels',
 
-    'apps.accounts',
+    'apps.accounts.apps.AccountsConfig',
     'apps.rooms',
     'apps.coding_tasks',
     'apps.matches',

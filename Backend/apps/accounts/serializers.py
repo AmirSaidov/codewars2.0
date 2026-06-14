@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import update_last_login
+from django.core.validators import URLValidator
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.settings import api_settings
@@ -12,17 +14,67 @@ from .models import UserProfile
 User = get_user_model()
 
 
+def validate_avatar_url(value):
+    value = (value or '').strip()
+    if not value:
+        return ''
+    if len(value) > 2048:
+        raise serializers.ValidationError('Avatar URL is too long.')
+    validator = URLValidator(schemes=['http', 'https'])
+    try:
+        validator(value)
+    except DjangoValidationError as exc:
+        raise serializers.ValidationError('Avatar must be a valid http(s) URL.') from exc
+    return value
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = ['avatar', 'bio', 'display_name', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class UserProfileUpdateSerializer(serializers.Serializer):
+    avatar = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    bio = serializers.CharField(required=False, allow_blank=True)
+    display_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+
+    def validate_avatar(self, value):
+        return validate_avatar_url(value)
+
+    def validate_display_name(self, value):
+        return (value or '').strip()
+
+
 class UserSerializer(serializers.ModelSerializer):
+    profile = serializers.SerializerMethodField()
     avatar = serializers.SerializerMethodField()
     bio = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'avatar', 'bio']
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'is_staff',
+            'profile',
+            'avatar',
+            'bio',
+            'display_name',
+        ]
         read_only_fields = fields
 
     def _get_profile(self, obj):
-        return UserProfile.objects.filter(user=obj).first()
+        profile, _ = UserProfile.objects.get_or_create(user=obj)
+        return profile
+
+    def get_profile(self, obj):
+        return UserProfileSerializer(self._get_profile(obj)).data
 
     def get_avatar(self, obj):
         profile = self._get_profile(obj)
@@ -31,6 +83,10 @@ class UserSerializer(serializers.ModelSerializer):
     def get_bio(self, obj):
         profile = self._get_profile(obj)
         return profile.bio if profile else ''
+
+    def get_display_name(self, obj):
+        profile = self._get_profile(obj)
+        return profile.display_name if profile else ''
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -51,17 +107,19 @@ class RegisterSerializer(serializers.ModelSerializer):
         user = User(**validated_data)
         user.set_password(password)
         user.save()
-        UserProfile.objects.create(user=user)
+        UserProfile.objects.get_or_create(user=user)
         return user
 
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
-    avatar = serializers.CharField(required=False, allow_blank=True)
-    bio = serializers.CharField(required=False, allow_blank=True)
+    profile = UserProfileUpdateSerializer(required=False)
+    avatar = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    bio = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    display_name = serializers.CharField(required=False, allow_blank=True, max_length=150, write_only=True)
 
     class Meta:
         model = User
-        fields = ['username', 'email', 'first_name', 'last_name', 'bio', 'avatar']
+        fields = ['username', 'email', 'first_name', 'last_name', 'profile', 'bio', 'avatar', 'display_name']
 
     def validate_username(self, value):
         value = (value or '').strip()
@@ -82,30 +140,29 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_avatar(self, value):
-        if not value:
-            return ''
-        if not value.startswith('data:image/'):
-            raise serializers.ValidationError('Avatar must be an image data URL.')
-        if len(value) > 2_000_000:
-            raise serializers.ValidationError('Avatar is too large.')
-        return value
+        return validate_avatar_url(value)
+
+    def validate_display_name(self, value):
+        return (value or '').strip()
 
     def update(self, instance, validated_data):
         profile, _ = UserProfile.objects.get_or_create(user=instance)
-        bio = validated_data.pop('bio', None)
-        avatar = validated_data.pop('avatar', None)
+        profile_data = validated_data.pop('profile', {}) or {}
+
+        # Accept legacy flat payloads while making nested profile the canonical API.
+        for field in ['bio', 'avatar', 'display_name']:
+            if field in validated_data:
+                profile_data[field] = validated_data.pop(field)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save(update_fields=list(validated_data.keys()) or None)
 
         profile_updates = []
-        if bio is not None:
-            profile.bio = bio
-            profile_updates.append('bio')
-        if avatar is not None:
-            profile.avatar = avatar
-            profile_updates.append('avatar')
+        for field in ['bio', 'avatar', 'display_name']:
+            if field in profile_data:
+                setattr(profile, field, profile_data[field])
+                profile_updates.append(field)
         if profile_updates:
             profile.save(update_fields=profile_updates + ['updated_at'])
 

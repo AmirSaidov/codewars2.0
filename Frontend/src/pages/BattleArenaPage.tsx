@@ -234,8 +234,17 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         // leaderboard will be rebroadcast
         break;
       case 'solution_accepted':
+      case 'solution_rejected': {
+        const payload = event.payload || {};
+        const nextStatus = name === 'solution_accepted' ? 'accepted' : (payload.status || 'wrong_answer');
+        setSubmission((current) => {
+          if (!current) return current;
+          if (payload.submission_id && Number(payload.submission_id) !== current.id) return current;
+          return { ...current, status: nextStatus as Submission['status'] };
+        });
         // leaderboard will be rebroadcast
         break;
+      }
       case 'round_started':
         setRound(event.payload.round_number ?? event.payload.round ?? 1);
         setSubmission(null);

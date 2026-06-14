@@ -96,8 +96,8 @@ def start_match(user, room, task_ids=None, round_count=None):
     room = Room.objects.select_for_update().get(pk=room.pk)
     ensure_room_admin(user, room)
 
-    if room.status == Room.Status.RUNNING:
-        raise ValidationError('Room already has a running match.')
+    if room.status != Room.Status.WAITING:
+        raise ValidationError('Room is not waiting for a new match.')
 
     tasks = _resolve_match_tasks(room, task_ids=task_ids, round_count=round_count)
     memberships = list(
@@ -184,7 +184,11 @@ def mark_player_solved(submission):
         round=submission.round,
         participant=participant,
     )
-    if round_state.status != RoundParticipant.Status.SOLVED:
+    should_advance = round_state.status not in [
+        RoundParticipant.Status.SOLVED,
+        RoundParticipant.Status.PASSED,
+    ]
+    if should_advance:
         participant.score += 100
         participant.solved_rounds += 1
         participant.total_solution_time += submission.execution_time
@@ -195,10 +199,58 @@ def mark_player_solved(submission):
     round_state.time_spent = submission.execution_time
     round_state.save(update_fields=['status', 'solved_at', 'time_spent'])
     sync_match_leaderboard(submission.match)
+    if should_advance:
+        broadcast_room_event(
+            submission.match.room_id,
+            'player_advanced',
+            {
+                'match_id': submission.match_id,
+                'round_id': submission.round_id,
+                'round_number': submission.round.number,
+                'user_id': participant.user_id,
+                'username': participant.user.get_username(),
+                'round_level': min(participant.solved_rounds + 1, 5),
+                'solved_count': participant.solved_rounds,
+                'points': participant.score,
+            },
+        )
     return participant
 
 
-def _finish_match(match, winner=None):
+def _rank_participants(participants):
+    return sorted(
+        participants,
+        key=lambda participant: (
+            participant.status == MatchParticipant.Status.LEFT,
+            -participant.score,
+            participant.total_solution_time,
+            participant.joined_at,
+            participant.id,
+        ),
+    )
+
+
+def _participant_has_progress(participant):
+    return participant.score > 0 or participant.solved_rounds > 0
+
+
+def _select_winner(match, candidates=None):
+    participants = list(candidates) if candidates is not None else list(
+        MatchParticipant.objects.filter(match=match).select_related('user')
+    )
+    eligible = [participant for participant in participants if participant.status != MatchParticipant.Status.LEFT]
+    if not eligible:
+        return None
+    leader = _rank_participants(eligible)[0]
+    if not _participant_has_progress(leader):
+        return None
+    return leader.user
+
+
+def _finish_match(match, winner=None, candidates=None, auto_select_winner=True):
+    if winner is None and auto_select_winner:
+        winner = _select_winner(match, candidates)
+
     match.status = Match.Status.FINISHED
     match.finished_at = timezone.now()
     match.winner = winner
@@ -210,10 +262,20 @@ def _finish_match(match, winner=None):
         match.current_round.save(update_fields=['status', 'ended_at'])
 
     if winner:
-        MatchParticipant.objects.filter(match=match, user=winner).update(status=MatchParticipant.Status.WINNER)
+        now = timezone.now()
+        MatchParticipant.objects.filter(match=match, user=winner).update(
+            status=MatchParticipant.Status.WINNER,
+            eliminated_at=None,
+        )
+        MatchParticipant.objects.filter(match=match).exclude(user=winner).exclude(
+            status=MatchParticipant.Status.LEFT
+        ).update(status=MatchParticipant.Status.ELIMINATED, eliminated_at=now)
+    else:
+        MatchParticipant.objects.filter(match=match).exclude(
+            status=MatchParticipant.Status.LEFT
+        ).update(status=MatchParticipant.Status.ELIMINATED, eliminated_at=timezone.now())
 
-    # Return room back to lobby state so players can start again without re-joining.
-    match.room.status = Room.Status.WAITING
+    match.room.status = Room.Status.FINISHED
     match.room.save(update_fields=['status'])
     RoomMembership.objects.filter(room=match.room, status=RoomMembership.Status.ACTIVE).update(is_ready=False)
     sync_match_leaderboard(match)
@@ -221,7 +283,13 @@ def _finish_match(match, winner=None):
     broadcast_room_event(
         match.room_id,
         'match_finished',
-        {'match_id': match.id, 'winner_id': winner.id if winner else None},
+        {
+            'match_id': match.id,
+            'room_id': match.room_id,
+            'winner_id': winner.id if winner else None,
+            'username': winner.get_username() if winner else None,
+            'room_status': match.room.status,
+        },
     )
     return match
 
@@ -253,7 +321,14 @@ def _advance_round_locked(match):
             broadcast_room_event(
                 match.room_id,
                 'player_eliminated',
-                {'match_id': match.id, 'user_id': participant.user_id, 'round_id': current_round.id},
+                {
+                    'match_id': match.id,
+                    'user_id': participant.user_id,
+                    'username': participant.user.get_username(),
+                    'round_id': current_round.id,
+                    'round_number': current_round.number,
+                    'round_level': min(participant.solved_rounds + 1, 5),
+                },
             )
 
     current_round.status = Round.Status.FINISHED
@@ -267,7 +342,7 @@ def _advance_round_locked(match):
 
     if len(remaining) <= 1 or not next_round:
         winner = remaining[0].user if remaining else None
-        return _finish_match(match, winner)
+        return _finish_match(match, winner, candidates=remaining or None)
 
     next_round.status = Round.Status.RUNNING
     next_round.started_at = timezone.now()
@@ -367,9 +442,8 @@ def stop_match(user, match):
     if match.status != Match.Status.RUNNING:
         raise ValidationError('Match is not running.')
 
-    remaining = list(MatchParticipant.objects.filter(match=match, status=MatchParticipant.Status.ACTIVE).select_related('user'))
-    winner = remaining[0].user if len(remaining) == 1 else None
-    return _finish_match(match, winner)
+    winner = _select_winner(match)
+    return _finish_match(match, winner, auto_select_winner=False)
 
 
 @transaction.atomic
@@ -442,9 +516,36 @@ def pass_player_to_next_round(admin_user, match, target_user):
         round=match.current_round,
         participant=participant,
     )
+    should_advance = round_state.status not in [
+        RoundParticipant.Status.SOLVED,
+        RoundParticipant.Status.PASSED,
+    ]
+    if should_advance:
+        participant.solved_rounds += 1
+        participant.save(update_fields=['solved_rounds'])
+
     round_state.status = RoundParticipant.Status.PASSED
     round_state.save(update_fields=['status'])
+    sync_match_leaderboard(match)
+    if should_advance:
+        broadcast_room_event(
+            match.room_id,
+            'player_advanced',
+            {
+                'match_id': match.id,
+                'round_id': match.current_round_id,
+                'round_number': match.current_round.number,
+                'user_id': participant.user_id,
+                'username': participant.user.get_username(),
+                'round_level': min(participant.solved_rounds + 1, 5),
+                'solved_count': participant.solved_rounds,
+                'points': participant.score,
+            },
+        )
     broadcast_leaderboard(match)
+    if _all_active_participants_resolved_for_round(match, match.current_round):
+        _advance_round_locked(match)
+        participant.refresh_from_db()
     return participant
 
 
@@ -473,7 +574,13 @@ def eliminate_player(admin_user, match, target_user):
     broadcast_room_event(
         match.room_id,
         'player_eliminated',
-        {'match_id': match.id, 'user_id': target_user.id},
+        {
+            'match_id': match.id,
+            'user_id': target_user.id,
+            'username': target_user.get_username(),
+            'round_id': match.current_round_id,
+            'round_level': min(participant.solved_rounds + 1, 5),
+        },
     )
     broadcast_leaderboard(match)
 

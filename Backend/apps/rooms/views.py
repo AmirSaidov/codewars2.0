@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
 
 from apps.leaderboard.serializers import LeaderboardEntrySerializer
 from apps.leaderboard.services import get_room_leaderboard
@@ -10,6 +11,9 @@ from apps.matches.serializers import MatchSerializer, StartMatchSerializer
 from apps.matches.services import restart_current_round, start_match, stop_match, pass_player_to_next_round
 from apps.matches.models import Match, MatchParticipant
 from apps.coding_tasks.models import CodingTask
+from apps.submissions.models import Submission
+from apps.submissions.serializers import SubmissionSerializer
+from apps.submissions.services import accept_submission, reject_submission
 from django.contrib.auth import get_user_model
 
 from .models import Room
@@ -146,6 +150,18 @@ class RoomViewSet(viewsets.ModelViewSet):
         match = start_match(request.user, room, task_ids or None, round_count=round_count)
         return Response(MatchSerializer(match, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='admin/start')
+    def admin_start(self, request, pk=None):
+        room = self.get_object()
+        serializer = StartMatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        task_ids = serializer.validated_data.get('task_ids')
+        round_count = serializer.validated_data.get('round_count') or room.round_count
+        if not task_ids:
+            task_ids = list(room.selected_tasks.order_by('position', 'created_at').values_list('task_id', flat=True))
+        match = start_match(request.user, room, task_ids or None, round_count=round_count)
+        return Response({'success': True, 'match_id': match.id}, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['get'])
     def leaderboard(self, request, pk=None):
         room = self.get_object()
@@ -231,6 +247,60 @@ class RoomViewSet(viewsets.ModelViewSet):
         pass_player_to_next_round(request.user, match, target_user)
         return Response({'success': True})
 
+    @action(detail=True, methods=['get'], url_path='admin/submissions')
+    def admin_submissions(self, request, pk=None):
+        room = self.get_object()
+        ensure_room_admin(request.user, room)
+        submissions = Submission.objects.select_related(
+            'user',
+            'match__room',
+            'round',
+            'task',
+            'moderated_by',
+        ).filter(match__room=room)
+
+        match_filter = str(request.query_params.get('match') or '').strip()
+        if match_filter.isdigit():
+            submissions = submissions.filter(match_id=int(match_filter))
+        else:
+            running_match = room.matches.filter(status=Match.Status.RUNNING).order_by('-created_at').first()
+            if running_match:
+                submissions = submissions.filter(match=running_match)
+
+        round_filter = str(request.query_params.get('round') or '').strip()
+        if round_filter.isdigit():
+            round_number_or_id = int(round_filter)
+            submissions = submissions.filter(Q(round_id=round_number_or_id) | Q(round__number=round_number_or_id))
+
+        serializer = SubmissionSerializer(submissions, many=True, context=self.get_serializer_context())
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path=r'admin/submissions/(?P<submission_id>\d+)/accept')
+    def admin_accept_submission(self, request, pk=None, submission_id=None):
+        room = self.get_object()
+        ensure_room_admin(request.user, room)
+        submission = get_object_or_404(Submission, pk=submission_id, match__room=room)
+        updated = accept_submission(request.user, submission)
+        return Response(
+            {
+                'success': True,
+                'submission': SubmissionSerializer(updated, context=self.get_serializer_context()).data,
+            }
+        )
+
+    @action(detail=True, methods=['post'], url_path=r'admin/submissions/(?P<submission_id>\d+)/reject')
+    def admin_reject_submission(self, request, pk=None, submission_id=None):
+        room = self.get_object()
+        ensure_room_admin(request.user, room)
+        submission = get_object_or_404(Submission, pk=submission_id, match__room=room)
+        updated = reject_submission(request.user, submission)
+        return Response(
+            {
+                'success': True,
+                'submission': SubmissionSerializer(updated, context=self.get_serializer_context()).data,
+            }
+        )
+
     @action(detail=True, methods=['post'], url_path='admin/task')
     def admin_task(self, request, pk=None):
         room = self.get_object()
@@ -275,26 +345,82 @@ class RoomViewSet(viewsets.ModelViewSet):
             duration_seconds = int((match.finished_at - match.started_at).total_seconds())
 
         participants = list(match.participants.select_related('user').exclude(user_id=room.creator_id))
-        participants.sort(key=lambda p: (-p.score, p.total_solution_time, p.joined_at))
+        ranked_participants = sorted(
+            participants,
+            key=lambda participant: (
+                participant.status == MatchParticipant.Status.LEFT,
+                -participant.solved_rounds,
+                -participant.score,
+                participant.total_solution_time,
+                participant.joined_at,
+                participant.id,
+            ),
+        )
+
+        participant_by_user_id = {participant.user_id: participant for participant in participants}
+        winner = match.winner if match.winner_id in participant_by_user_id else None
+
+        if winner is None and ranked_participants:
+            leader = ranked_participants[0]
+            if leader.solved_rounds > 0 or leader.score > 0:
+                winner = leader.user
+
+        winner_id = winner.id if winner else None
+        final_participants = sorted(
+            participants,
+            key=lambda participant: (
+                participant.user_id != winner_id if winner_id is not None else True,
+                participant.status in [MatchParticipant.Status.ELIMINATED, MatchParticipant.Status.LEFT],
+                -participant.solved_rounds,
+                -participant.score,
+                participant.total_solution_time,
+                participant.joined_at,
+                participant.id,
+            ),
+        )
 
         players = []
-        for idx, participant in enumerate(participants, start=1):
+        for idx, participant in enumerate(final_participants, start=1):
+            is_winner = winner_id is not None and participant.user_id == winner_id
+            status_value = MatchParticipant.Status.WINNER if is_winner else participant.status
+            is_eliminated = (
+                not is_winner
+                and status_value in [MatchParticipant.Status.ELIMINATED, MatchParticipant.Status.LEFT]
+            )
             players.append(
                 {
                     'id': participant.user_id,
                     'username': participant.user.get_username(),
+                    'rank': idx,
                     'final_rank': idx,
+                    'rounds_solved': participant.solved_rounds,
                     'solved_rounds': participant.solved_rounds,
-                    'is_eliminated': participant.status in [MatchParticipant.Status.ELIMINATED, MatchParticipant.Status.LEFT],
+                    'solved_count': participant.solved_rounds,
+                    'total_time': participant.total_solution_time,
+                    'total_solution_time': participant.total_solution_time,
+                    'points': participant.score,
+                    'score': participant.score,
+                    'status': status_value,
+                    'is_winner': is_winner,
+                    'is_eliminated': is_eliminated,
                 }
             )
 
-        winner = match.winner
+        winner_payload = None
+        if winner:
+            winner_payload = {
+                'id': winner.id,
+                'username': winner.get_username(),
+            }
+
         return Response(
             {
                 'room_id': room.id,
-                'winner': {'id': winner.id, 'username': winner.get_username()} if winner else None,
+                'winner': winner_payload,
                 'players': players,
+                'standings': players,
+                'players_count': len(players),
+                'duration': duration_seconds,
                 'duration_seconds': duration_seconds,
                 'finished_at': match.finished_at.isoformat() if match.finished_at else timezone.now().isoformat(),
             }

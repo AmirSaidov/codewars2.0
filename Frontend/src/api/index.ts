@@ -40,6 +40,7 @@ const getToken = (): string | null => {
     const token = parsed?.token;
     if (token) {
       localStorage.setItem('cz_token', token);
+      localStorage.removeItem('cz_user');
       return token;
     }
   } catch {
@@ -52,15 +53,7 @@ const getRefreshToken = (): string | null => localStorage.getItem('cz_refresh');
 
 const setAccessToken = (token: string): void => {
   localStorage.setItem('cz_token', token);
-  try {
-    const storedUser = localStorage.getItem('cz_user');
-    if (!storedUser) return;
-    const parsed = JSON.parse(storedUser) as { token?: string } | null;
-    if (!parsed) return;
-    localStorage.setItem('cz_user', JSON.stringify({ ...parsed, token }));
-  } catch {
-    // Keep the standalone token even if the legacy user blob is malformed.
-  }
+  localStorage.removeItem('cz_user');
 };
 
 const setRefreshToken = (token: string): void => {
@@ -213,7 +206,10 @@ const req = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
             : '';
     throw new Error(sanitizeErrorDetail(detail) || `HTTP ${res.status}`);
   }
-  return res.json();
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 };
 
 type ListResponse<T> = { results: T[]; count: number };
@@ -240,8 +236,16 @@ export interface UserProfile {
   first_name?: string;
   last_name?: string;
   is_staff?: boolean;
+  profile?: {
+    avatar: string;
+    bio: string;
+    display_name: string;
+    created_at?: string;
+    updated_at?: string;
+  };
   avatar?: string;
   bio?: string;
+  display_name?: string;
 }
 
 export interface ProfileUpdatePayload {
@@ -249,8 +253,11 @@ export interface ProfileUpdatePayload {
   email?: string;
   first_name?: string;
   last_name?: string;
-  bio?: string;
-  avatar?: string;
+  profile?: {
+    avatar?: string;
+    bio?: string;
+    display_name?: string;
+  };
 }
 
 export interface Room {
@@ -373,11 +380,32 @@ export interface Submission {
   manual_decision?: string | null;
 }
 
+export interface MatchResultPlayer {
+    id: number;
+    username: string;
+    rank: number;
+    final_rank: number;
+    rounds_solved: number;
+    solved_rounds: number;
+    solved_count: number;
+    total_time: number;
+    total_solution_time: number;
+    points: number;
+    score: number;
+    status: string;
+    is_winner: boolean;
+    is_eliminated: boolean;
+}
+
 export interface MatchResult {
   room_id: number;
   winner: { id: number; username: string } | null;
-  players: { id: number; username: string; final_rank: number; solved_rounds: number; is_eliminated: boolean }[];
-  duration_seconds: number; finished_at: string;
+  players: MatchResultPlayer[];
+  standings?: MatchResultPlayer[];
+  players_count?: number;
+  duration?: number;
+  duration_seconds: number;
+  finished_at: string;
 }
 
 export interface LeaderboardEntry {

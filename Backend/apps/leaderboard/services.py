@@ -22,7 +22,7 @@ def sync_match_leaderboard(match):
                 'solved_count': participant.solved_rounds,
                 'total_solution_time': participant.total_solution_time,
                 'player_status': participant.status,
-                'eliminated': participant.status == participant.Status.ELIMINATED,
+                'eliminated': participant.status in [participant.Status.ELIMINATED, participant.Status.LEFT],
                 'last_submission_status': last_submission.status if last_submission else '',
             },
         )
