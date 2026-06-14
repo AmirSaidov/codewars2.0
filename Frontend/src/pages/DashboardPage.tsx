@@ -4,7 +4,7 @@ import type { Page } from '../App';
 import type { User } from '../context/contexts';
 import { roomsApi } from '../api';
 import type { Room, CreateRoomPayload } from '../api';
-import { Lock, Palette } from 'lucide-react';
+import { Lock, Palette, UserCircle2 } from 'lucide-react';
 
 interface Props {
   navigate: (p: Page, roomId?: string | number) => void;
@@ -184,6 +184,11 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('theme-settings')}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <Palette size={14} /> THEMES
+              </span>
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('profile')}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <UserCircle2 size={14} /> PROFILE
               </span>
             </button>
             <button className="btn btn-ghost btn-sm" onClick={onLogout}>LOGOUT</button>

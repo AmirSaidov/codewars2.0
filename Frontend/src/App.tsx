@@ -8,6 +8,7 @@ import RoomLobbyPage from './pages/RoomLobbyPage';
 import BattleArenaPage from './pages/BattleArenaPage';
 import TournamentPage from './pages/TournamentPage';
 import { AdminPanelPage, MatchResultsPage, ThemeSettingsPage } from './pages/OtherPages';
+import ProfilePage from './pages/ProfilePage';
 
 export type Page =
   | 'landing'
@@ -19,11 +20,12 @@ export type Page =
   | 'tournament'
   | 'admin'
   | 'results'
+  | 'profile'
   | 'theme-settings';
 
 type RouteState = { page: Page; roomId?: string | null };
 
-const protectedPages: Page[] = ['dashboard', 'lobby', 'arena', 'tournament', 'admin', 'results'];
+const protectedPages: Page[] = ['dashboard', 'lobby', 'arena', 'tournament', 'admin', 'results', 'profile'];
 const roomPages: Page[] = ['lobby', 'arena', 'tournament', 'admin', 'results'];
 
 const normalizeRoomId = (value: unknown) => {
@@ -52,6 +54,7 @@ const parseRoute = (): RouteState | null => {
     '/login': 'login',
     '/register': 'register',
     '/dashboard': 'dashboard',
+    '/profile': 'profile',
     '/theme-settings': 'theme-settings',
   };
   return staticRoutes[path] ? { page: staticRoutes[path] } : null;
@@ -67,6 +70,7 @@ const pathForPage = (page: Page, roomId?: string | null) => {
   if (page === 'login') return '/login';
   if (page === 'register') return '/register';
   if (page === 'dashboard') return '/dashboard';
+  if (page === 'profile') return '/profile';
   if (page === 'theme-settings') return '/theme-settings';
   return '/';
 };
@@ -106,6 +110,12 @@ const App: React.FC = () => {
     localStorage.setItem('cz_user', JSON.stringify(u));
     if (u.token) localStorage.setItem('cz_token', u.token);
     navigate('dashboard');
+  };
+
+  const updateUser = (u: User) => {
+    setUser(u);
+    localStorage.setItem('cz_user', JSON.stringify(u));
+    if (u.token) localStorage.setItem('cz_token', u.token);
   };
 
   const clearSession = () => {
@@ -212,6 +222,7 @@ const App: React.FC = () => {
       case 'login': return <LoginPage navigate={navigate} onLogin={login} />;
       case 'register': return <RegisterPage navigate={navigate} onLogin={login} />;
       case 'dashboard': return <DashboardPage navigate={navigate} user={user} onLogout={logout} />;
+      case 'profile': return <ProfilePage navigate={navigate} />;
       case 'lobby': return <RoomLobbyPage navigate={navigate} user={user} roomId={roomId} />;
       case 'arena': return <BattleArenaPage navigate={navigate} user={user} roomId={roomId} />;
       case 'tournament': return <TournamentPage navigate={navigate} user={user} roomId={roomId} />;
@@ -224,7 +235,7 @@ const App: React.FC = () => {
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme: changeTheme }}>
-      <AuthContext.Provider value={{ user, login, logout }}>
+      <AuthContext.Provider value={{ user, login, updateUser, logout }}>
         <WebSocketContext.Provider value={{ ws, setWs, messages: wsMessages, addMessage: (m) => setWsMessages(p => [...p, m]) }}>
           <div data-theme={theme} className="app-root">
             {renderPage()}

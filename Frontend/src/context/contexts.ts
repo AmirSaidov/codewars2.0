@@ -20,6 +20,9 @@ export interface User {
   id: string | number;
   username: string;
   email: string;
+  first_name?: string;
+  last_name?: string;
+  bio?: string;
   avatar?: string;
   token: string;
   is_staff?: boolean;
@@ -28,12 +31,14 @@ export interface User {
 export interface AuthContextType {
   user: User | null;
   login: (u: User) => void;
+  updateUser: (u: User) => void;
   logout: () => void;
 }
 
 export const AuthContext = createContext<AuthContextType>({
   user: null,
   login: () => {},
+  updateUser: () => {},
   logout: () => {},
 });
 

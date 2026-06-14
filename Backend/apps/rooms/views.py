@@ -8,12 +8,20 @@ from apps.leaderboard.serializers import LeaderboardEntrySerializer
 from apps.leaderboard.services import get_room_leaderboard
 from apps.matches.serializers import MatchSerializer, StartMatchSerializer
 from apps.matches.services import restart_current_round, start_match, stop_match, pass_player_to_next_round
-from apps.matches.models import MatchParticipant
+from apps.matches.models import Match, MatchParticipant
 from apps.coding_tasks.models import CodingTask
 from django.contrib.auth import get_user_model
 
 from .models import Room
-from .serializers import AdminPlayerSerializer, AdminRoomConfigSerializer, AdminTaskSerializer, JoinRoomSerializer, ReadySerializer, RoomSerializer
+from .serializers import (
+    AdminPlayerSerializer,
+    AdminRoomConfigSerializer,
+    AdminTaskSerializer,
+    JoinRoomSerializer,
+    ReadySerializer,
+    RoomChatMessageSerializer,
+    RoomSerializer,
+)
 from .services import create_room, disband_room, get_active_room_for_user, join_room, leave_room, set_ready, ensure_room_admin
 from .models import RoomSelectedTask
 
@@ -25,6 +33,65 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Room.objects.select_related('creator').prefetch_related('memberships__user')
+
+    def _get_latest_match(self, room):
+        return (
+            room.matches.select_related('winner', 'current_round')
+            .prefetch_related('participants__user')
+            .order_by('-created_at')
+            .first()
+        )
+
+    def _serialize_tournament_players(self, match):
+        if not match:
+            return []
+
+        participants = list(
+            match.participants.select_related('user').exclude(user_id=match.room.creator_id)
+        )
+        players = []
+        for participant in participants:
+            is_winner = participant.status == MatchParticipant.Status.WINNER
+            is_eliminated = participant.status in [MatchParticipant.Status.ELIMINATED, MatchParticipant.Status.LEFT]
+            if is_winner:
+                status_value = 'winner'
+            elif is_eliminated:
+                status_value = 'eliminated'
+            elif participant.solved_rounds > 0:
+                status_value = 'advanced'
+            elif match.status == Match.Status.WAITING:
+                status_value = 'waiting'
+            else:
+                status_value = 'active'
+
+            round_level = min(max(participant.solved_rounds + 1, 1), 5)
+            if is_winner:
+                round_level = 5
+
+            players.append(
+                {
+                    'user_id': participant.user_id,
+                    'username': participant.user.get_username(),
+                    'status': status_value,
+                    'round_level': round_level,
+                    'is_winner': is_winner,
+                    'is_eliminated': is_eliminated,
+                    'points': participant.score,
+                    'solved_count': participant.solved_rounds,
+                    'total_solution_time': participant.total_solution_time,
+                }
+            )
+
+        players.sort(
+            key=lambda player: (
+                not player['is_winner'],
+                player['is_eliminated'],
+                -(player['points'] or 0),
+                player['total_solution_time'] or 0,
+                player['username'].lower(),
+            )
+        )
+        return players
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -84,6 +151,36 @@ class RoomViewSet(viewsets.ModelViewSet):
         room = self.get_object()
         entries = get_room_leaderboard(room)
         return Response(LeaderboardEntrySerializer(entries, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def messages(self, request, pk=None):
+        room = self.get_object()
+        messages = list(room.chat_messages.select_related('user').order_by('-created_at', '-id')[:50])
+        serializer = RoomChatMessageSerializer(list(reversed(messages)), many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def tournament(self, request, pk=None):
+        room = self.get_object()
+        match = self._get_latest_match(room)
+        current_round = 1
+        status_value = room.status
+
+        if match:
+            if match.current_round_id:
+                current_round = match.current_round.number
+            elif match.winner_id:
+                current_round = room.round_count
+            status_value = room.status if room.status != Room.Status.WAITING else match.status
+
+        return Response(
+            {
+                'room_id': room.id,
+                'status': status_value,
+                'current_round': current_round,
+                'players': self._serialize_tournament_players(match),
+            }
+        )
 
     @action(detail=False, methods=['get'], url_path='my-active')
     def my_active(self, request):

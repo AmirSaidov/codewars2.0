@@ -560,9 +560,6 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
                   <div>
                     <div className="label" style={{ marginBottom: 6 }}>LIVE BRACKET</div>
-                    <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, letterSpacing: 2, color: 'var(--text-primary)' }}>
-                      KING OF THE HILL
-                    </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     <span className="tag tag-accent">MATCH #{matchData.id}</span>

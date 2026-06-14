@@ -240,6 +240,17 @@ export interface UserProfile {
   first_name?: string;
   last_name?: string;
   is_staff?: boolean;
+  avatar?: string;
+  bio?: string;
+}
+
+export interface ProfileUpdatePayload {
+  username?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  bio?: string;
+  avatar?: string;
 }
 
 export interface Room {
@@ -442,6 +453,8 @@ export const authApi = {
   },
 
   me: () => req<UserProfile>('/auth/me/'),
+  updateMe: (data: ProfileUpdatePayload) =>
+    req<UserProfile>('/auth/me/', { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 // ─── Rooms API ────────────────────────────────────────────────
