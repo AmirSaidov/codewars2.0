@@ -388,16 +388,16 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
   };
 
   return (
-    <div className="page">
+    <div className="page admin-page">
       <nav className="navbar">
-        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="container mobile-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <div className="mobile-nav-brand" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <button type="button" className="btn btn-ghost btn-sm" onClick={handleLobbyClick}>← LOBBY</button>
             <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 3, color: 'var(--accent)' }}>
               ADMIN PANEL
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className="mobile-nav-actions" style={{ display: 'flex', gap: 12 }}>
             <button className="btn btn-danger btn-sm" onClick={handleStop} disabled={!matchId}>
               ■ END MATCH
             </button>
@@ -450,7 +450,7 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
           </div>
         )}
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 28 }}>
+        <div className="admin-tabs" style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 28 }}>
           {(['submissions', 'players', 'tasks'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: '12px 24px', background: 'none', border: 'none',
@@ -471,7 +471,7 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
 
         {/* SUBMISSIONS TAB */}
         {tab === 'submissions' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+          <div className="admin-main-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             <div>
               <div className="section-label" style={{ marginBottom: 16 }}>ALL SUBMISSIONS</div>
               {submissions.map(sub => (

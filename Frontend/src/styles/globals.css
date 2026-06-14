@@ -13,8 +13,8 @@
   --accent: #e87c2a;
   --accent-dim: #a85a1e;
   --accent-glow: rgba(232, 124, 42, 0.25);
-  --text-primary: #d4c9b0;
-  --text-secondary: #7a7260;
+  --text-primary: #ddd4bf;
+  --text-secondary: #a89f89;
   --text-accent: #e87c2a;
   --border: #2a2820;
   --border-accent: #e87c2a;
@@ -26,6 +26,13 @@
   --font-body: 'Rajdhani', sans-serif;
   --font-code: 'JetBrains Mono', monospace;
   --scanline: rgba(232, 124, 42, 0.03);
+  --text: var(--text-secondary);
+  --text-h: var(--text-primary);
+  --bg: var(--bg-primary);
+  --code-bg: rgba(255, 255, 255, 0.06);
+  --accent-bg: rgba(232, 124, 42, 0.12);
+  --accent-border: rgba(232, 124, 42, 0.45);
+  --social-bg: rgba(255, 255, 255, 0.04);
   --noise: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
 }
 
@@ -38,8 +45,8 @@
   --accent: #00f5ff;
   --accent-dim: #0099aa;
   --accent-glow: rgba(0, 245, 255, 0.2);
-  --text-primary: #e0d0ff;
-  --text-secondary: #b39cff;
+  --text-primary: #eedfff;
+  --text-secondary: #cdbdff;
   --text-accent: #ff00cc;
   --border: #3a1f6b;
   --border-accent: #9b00ff;
@@ -51,31 +58,45 @@
   --font-body: 'Rajdhani', sans-serif;
   --font-code: 'JetBrains Mono', monospace;
   --scanline: rgba(0, 245, 255, 0.02);
+  --text: var(--text-secondary);
+  --text-h: var(--text-primary);
+  --bg: var(--bg-primary);
+  --code-bg: rgba(255, 255, 255, 0.05);
+  --accent-bg: rgba(0, 245, 255, 0.1);
+  --accent-border: rgba(0, 245, 255, 0.45);
+  --social-bg: rgba(255, 255, 255, 0.04);
   --noise: none;
 }
 
 /* ── HACKER TERMINAL THEME ── */
 [data-theme="hacker"] {
-  --bg-primary: #000800;
-  --bg-secondary: #010c01;
-  --bg-card: #041204;
-  --bg-card-hover: #061806;
+  --bg-primary: #000000;
+  --bg-secondary: #050505;
+  --bg-card: #0a0a0a;
+  --bg-card-hover: #121212;
   --accent: #00c83a;
-  --accent-dim: #006b1f;
-  --accent-glow: rgba(0, 200, 58, 0.12);
-  --text-primary: #00a82f;
-  --text-secondary: #0b3b12;
+  --accent-dim: #008f2c;
+  --accent-glow: rgba(0, 200, 58, 0.16);
+  --text-primary: #e7ffe9;
+  --text-secondary: #82c98f;
   --text-accent: #00c83a;
-  --border: #003300;
+  --border: #1a1a1a;
   --border-accent: #00c83a;
   --danger: #ff3300;
   --success: #00c83a;
   --warn: #ffff00;
-  --eliminated: #0d1a00;
+  --eliminated: #101010;
   --font-display: 'Share Tech Mono', monospace;
   --font-body: 'Share Tech Mono', monospace;
   --font-code: 'Share Tech Mono', monospace;
-  --scanline: rgba(0, 200, 58, 0.03);
+  --scanline: rgba(0, 200, 58, 0.02);
+  --text: var(--text-secondary);
+  --text-h: var(--text-primary);
+  --bg: var(--bg-primary);
+  --code-bg: rgba(255, 255, 255, 0.04);
+  --accent-bg: rgba(0, 200, 58, 0.12);
+  --accent-border: rgba(124, 255, 152, 0.35);
+  --social-bg: rgba(255, 255, 255, 0.04);
   --noise: none;
 }
 
@@ -499,6 +520,7 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   display: flex;
   align-items: center;
   gap: 12px;
+  opacity: 0.95;
 }
 .section-label::after {
   content: '';
@@ -530,6 +552,7 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 3px;
+  color: var(--text-primary);
   overflow-wrap: anywhere;
 }
 .room-lobby-room-id {
@@ -545,10 +568,21 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   gap: 12px;
   flex-shrink: 0;
 }
+.room-lobby-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .room-lobby-connection span {
   font-family: var(--font-code);
   font-size: 11px;
   color: var(--text-secondary);
+}
+.app-wordmark {
+  color: var(--text-primary);
+  text-shadow: 0 0 14px var(--accent-glow);
 }
 .container.room-lobby-shell {
   max-width: 1880px;
@@ -604,6 +638,7 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   font-family: var(--font-display);
   color: var(--text-primary);
   font-size: 13px;
+  font-weight: 700;
 }
 .room-lobby-player-info small,
 .room-lobby-player-state {
@@ -633,6 +668,33 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   gap: 16px;
   min-width: 0;
   align-self: stretch;
+}
+.room-lobby-page .card {
+  color: var(--text-primary);
+}
+.room-lobby-page .card .label,
+.room-lobby-page .card p,
+.room-lobby-page .card small,
+.room-lobby-page .card .room-lobby-muted {
+  color: var(--text-secondary);
+}
+.admin-page {
+  color: var(--text-primary);
+}
+.admin-page .card {
+  color: var(--text-primary);
+}
+.admin-page .card .label {
+  color: var(--text-secondary);
+}
+.admin-page .card h1,
+.admin-page .card h2,
+.admin-page .card h3,
+.admin-page .card h4,
+.admin-page .card strong,
+.admin-page .card span,
+.admin-page .card div {
+  color: inherit;
 }
 .room-lobby-state {
   margin-bottom: 20px;
@@ -1145,6 +1207,14 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   .room-lobby-connection {
     align-self: flex-end;
   }
+  .room-lobby-header-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .room-lobby-header-tools .btn {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
   .tournament-mountain-card {
     --tournament-node-size: clamp(24px, 7vw, 34px);
     --tournament-node-label-width: 34px;
@@ -1180,6 +1250,138 @@ select.input option { background: var(--bg-secondary); color: var(--text-primary
   .tournament-node-x {
     top: -2px;
     right: 0;
+  }
+
+  .mobile-nav {
+    height: auto !important;
+    min-height: 64px;
+    flex-direction: column;
+    align-items: stretch !important;
+    justify-content: center !important;
+    gap: 10px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .mobile-nav-brand,
+  .mobile-nav-actions {
+    width: 100%;
+  }
+  .mobile-nav-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px !important;
+  }
+  .mobile-nav-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
+  .dashboard-user-chip {
+    width: 100%;
+    justify-content: flex-end;
+    order: -1;
+  }
+  .dashboard-shell,
+  .profile-shell {
+    padding-top: 24px !important;
+    padding-bottom: 24px !important;
+  }
+  .dashboard-header {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 16px;
+  }
+  .dashboard-header-actions {
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+  .dashboard-header-actions .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  .dashboard-room-card {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+  .dashboard-room-title,
+  .dashboard-room-meta {
+    flex-wrap: wrap;
+  }
+  .landing-hero {
+    padding: 56px 20px !important;
+  }
+  .landing-stats {
+    gap: 24px !important;
+    margin-top: 44px !important;
+  }
+  .landing-step {
+    flex-direction: column;
+    gap: 14px !important;
+    padding: 24px 0 !important;
+  }
+  .profile-card-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .profile-field-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .admin-tabs {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .admin-main-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .arena-page {
+    height: auto !important;
+    min-height: 100vh;
+  }
+  .arena-topbar {
+    height: auto !important;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 10px !important;
+    padding: 12px !important;
+  }
+  .arena-main-grid {
+    display: flex !important;
+    flex-direction: column;
+    overflow: visible !important;
+  }
+  .arena-panel {
+    min-height: auto;
+    overflow: visible !important;
+  }
+  .arena-panel-left,
+  .arena-panel-right {
+    border: none !important;
+  }
+  .arena-panel-left {
+    order: 2;
+  }
+  .arena-panel-center {
+    order: 1;
+    min-height: 58vh;
+  }
+  .arena-panel-right {
+    order: 3;
+  }
+  .arena-examples-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .arena-stat-row {
+    flex-wrap: wrap;
+    gap: 10px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .container {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .arena-main-grid {
+    grid-template-columns: minmax(280px, 1fr) minmax(0, 1fr) 240px !important;
   }
 }
 

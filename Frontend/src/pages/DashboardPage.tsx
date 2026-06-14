@@ -164,18 +164,20 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
     <div className="page">
       {/* NAVBAR */}
       <nav className="navbar">
-        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="container mobile-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <div className="mobile-nav-brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 28, height: 28, background: 'var(--accent)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 900, color: 'var(--bg-primary)',
               clipPath: 'polygon(0 0, 100% 0, 100% 75%, 75% 100%, 0 100%)',
             }}>CZ</div>
-            <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 3 }}>COMMAND CENTER</span>
+            <span className="app-wordmark" style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 3, color: 'var(--text-primary)' }}>
+              COMMAND CENTER
+            </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="mobile-nav-actions" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div className="dashboard-user-chip" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div className="dot dot-green" />
               <span style={{ fontFamily: 'var(--font-code)', fontSize: 13, color: 'var(--text-primary)' }}>
                 {user?.username || 'OPERATIVE'}
@@ -196,16 +198,16 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
         </div>
       </nav>
 
-      <div className="container" style={{ paddingTop: 40, paddingBottom: 40 }}>
+      <div className="container dashboard-shell" style={{ paddingTop: 40, paddingBottom: 40 }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
+        <div className="dashboard-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
           <div>
             <div className="section-label" style={{ marginBottom: 8 }}>ACTIVE BATTLEFIELDS</div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 900, letterSpacing: 4 }}>
               ROOMS
             </h1>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className="dashboard-header-actions" style={{ display: 'flex', gap: 12 }}>
             <button className="btn btn-ghost btn-sm" onClick={fetchRooms}>↻ REFRESH</button>
             <button
               className="btn btn-ghost btn-sm"
@@ -236,7 +238,7 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {filtered.map((room, i) => (
-              <div key={room.id} className="card fade-in" style={{
+              <div key={room.id} className="card fade-in dashboard-room-card" style={{
                 animationDelay: `${i * 0.05}s`,
                 display: 'grid',
                 gridTemplateColumns: '1fr auto auto auto',
@@ -246,7 +248,7 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
               }}>
                 {/* Name + info */}
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <div className="dashboard-room-title" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                     {room.is_private && (
                       <span style={{ color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
                         <Lock size={14} />
@@ -259,7 +261,7 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
                       <span className="tag tag-danger" style={{ fontSize: 9 }}>● LIVE</span>
                     )}
                   </div>
-                  <div style={{ display: 'flex', gap: 16 }}>
+                  <div className="dashboard-room-meta" style={{ display: 'flex', gap: 16 }}>
                     <span style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)' }}>
                       host: {room.creator?.username || 'admin'}
                     </span>

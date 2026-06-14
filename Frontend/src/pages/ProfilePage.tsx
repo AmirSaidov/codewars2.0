@@ -42,6 +42,21 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
 
   if (!user?.token) return null;
 
+  const persistLocalProfile = () => {
+    const localUser = {
+      ...user,
+      username: form.username.trim(),
+      email: form.email.trim(),
+      first_name: form.first_name.trim(),
+      last_name: form.last_name.trim(),
+      bio: form.bio,
+      avatar: form.avatar,
+      token: user.token,
+    };
+    updateUser(localUser);
+    return localUser;
+  };
+
   const onPickAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -66,6 +81,7 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
     setSaving(true);
     setError('');
     setSuccess('');
+    const localUser = persistLocalProfile();
     try {
       const updated = await authApi.updateMe({
         username: form.username.trim(),
@@ -75,7 +91,7 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
         bio: form.bio,
         avatar: form.avatar,
       });
-      updateUser({ ...user, ...updated, token: user.token });
+      updateUser({ ...localUser, ...updated, token: user.token });
       setForm({
         username: updated.username,
         email: updated.email,
@@ -86,7 +102,8 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
       });
       setSuccess('Profile saved');
     } catch (saveError: any) {
-      setError(saveError?.message || 'Failed to save profile');
+      setSuccess('Profile saved locally');
+      setError(saveError?.message || 'Server save failed, local profile kept');
     } finally {
       setSaving(false);
     }
@@ -95,7 +112,7 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
   return (
     <div className="page">
       <nav className="navbar">
-        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+        <div className="container mobile-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('dashboard')}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <ArrowLeft size={14} /> BACK
@@ -110,8 +127,8 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
         </div>
       </nav>
 
-      <div className="container" style={{ paddingTop: 40, paddingBottom: 40, display: 'grid', gap: 24 }}>
-        <div className="card card-glow" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
+      <div className="container profile-shell" style={{ paddingTop: 40, paddingBottom: 40, display: 'grid', gap: 24 }}>
+        <div className="card card-glow profile-card-grid" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
           <div style={{ display: 'grid', justifyItems: 'center', alignContent: 'start', gap: 16 }}>
             <div
               style={{
@@ -165,7 +182,7 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
               </h1>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="profile-field-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div className="form-group">
                 <label className="label">Username</label>
                 <input className="input" value={form.username} onChange={(e) => setForm((current) => ({ ...current, username: e.target.value }))} />
@@ -176,7 +193,7 @@ const ProfilePage: React.FC<Props> = ({ navigate }) => {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="profile-field-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div className="form-group">
                 <label className="label">First name</label>
                 <input className="input" value={form.first_name} onChange={(e) => setForm((current) => ({ ...current, first_name: e.target.value }))} />

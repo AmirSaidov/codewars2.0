@@ -63,8 +63,8 @@ const LandingPage: React.FC<Props> = ({ navigate }) => {
     <div className="page" style={{ display: 'flex', flexDirection: 'column' }}>
       {/* NAV */}
       <nav className="navbar">
-        <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="container mobile-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <div className="mobile-nav-brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 32, height: 32,
               background: 'var(--accent)',
@@ -73,11 +73,11 @@ const LandingPage: React.FC<Props> = ({ navigate }) => {
               color: 'var(--bg-primary)',
               clipPath: 'polygon(0 0, 100% 0, 100% 75%, 75% 100%, 0 100%)',
             }}>CZ</div>
-            <span style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, letterSpacing: 3, color: 'var(--text-primary)' }}>
+            <span className="app-wordmark" style={{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 700, letterSpacing: 3, color: 'var(--text-primary)' }}>
               CODE ZONE
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className="mobile-nav-actions" style={{ display: 'flex', gap: 12 }}>
             <button className="btn btn-ghost btn-sm" onClick={() => navigate('login')}>SIGN IN</button>
             <button className="btn btn-primary btn-sm" onClick={() => navigate('register')}>JOIN NOW</button>
           </div>
@@ -85,7 +85,7 @@ const LandingPage: React.FC<Props> = ({ navigate }) => {
       </nav>
 
       {/* HERO */}
-      <section style={{
+      <section className="landing-hero" style={{
         flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         textAlign: 'center', padding: '80px 24px',
         background: theme === 'stalker'
@@ -148,7 +148,7 @@ const LandingPage: React.FC<Props> = ({ navigate }) => {
         </div>
 
         {/* stats */}
-        <div style={{
+        <div className="landing-stats" style={{
           display: 'flex', gap: 48, marginTop: 64,
           animation: 'fadeIn 1.2s ease forwards',
           flexWrap: 'wrap', justifyContent: 'center',
@@ -193,7 +193,7 @@ const LandingPage: React.FC<Props> = ({ navigate }) => {
               { num: '03', title: 'Solve & Submit', desc: 'Race to solve coding challenges before the timer runs out. Faster = more points' },
               { num: '04', title: 'Survive the Elimination', desc: 'Slowest solver each round gets eliminated. Last one standing is the Champion' },
             ].map((step, i) => (
-              <div key={step.num} style={{
+              <div key={step.num} className="landing-step" style={{
                 display: 'flex', gap: 32, alignItems: 'flex-start',
                 padding: '32px 0',
                 borderBottom: i < 3 ? '1px solid var(--border)' : 'none',

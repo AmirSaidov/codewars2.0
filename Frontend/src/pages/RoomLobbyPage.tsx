@@ -4,7 +4,7 @@ import type { Page } from '../App';
 import type { User } from '../context/contexts';
 import { roomsApi } from '../api';
 import type { Room, WSEvent, RoomChatMessage, UserProfile } from '../api';
-import { Check, Copy, Send, Settings, Zap } from 'lucide-react';
+import { Check, Copy, Palette, Send, Settings, UserCircle2, Zap } from 'lucide-react';
 import { useRoomWebSocket } from '../hooks/useRoomWebSocket';
 
 interface Props {
@@ -433,7 +433,7 @@ const RoomLobbyPage: React.FC<Props> = ({ navigate, user, roomId }) => {
   };
 
   return (
-    <div className="page">
+    <div className="page room-lobby-page">
       <nav className="navbar">
         <div className="container room-lobby-topbar">
           <div className="room-lobby-titlebar">
@@ -445,9 +445,21 @@ const RoomLobbyPage: React.FC<Props> = ({ navigate, user, roomId }) => {
               <span className="room-lobby-room-id">#{String(roomId ?? '').slice(-6).toUpperCase()}</span>
             </div>
           </div>
-          <div className="room-lobby-connection">
-            <div className={`dot ${connectionDotClass}`} />
-            <span>{connectionLabel}</span>
+          <div className="room-lobby-header-tools">
+            <div className="room-lobby-connection">
+              <div className={`dot ${connectionDotClass}`} />
+              <span>{connectionLabel}</span>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('theme-settings')}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Palette size={14} /> THEMES
+              </span>
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('profile')}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <UserCircle2 size={14} /> PROFILE
+              </span>
+            </button>
           </div>
         </div>
       </nav>

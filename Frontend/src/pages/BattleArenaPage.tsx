@@ -344,9 +344,9 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
   const eliminatedPlayers = sortedPlayers.length - survivingPlayers;
 
   return (
-    <div className="page" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div className="page arena-page" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* TOP BAR */}
-      <div style={{
+      <div className="arena-topbar" style={{
         height: 52, background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', padding: '0 16px', gap: 24, flexShrink: 0,
       }}>
@@ -389,10 +389,10 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
       </div>
 
       {/* MAIN CONTENT */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '380px 1fr 260px', overflow: 'hidden' }}>
+      <div className="arena-main-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: '380px 1fr 260px', overflow: 'hidden' }}>
 
         {/* LEFT — Problem + Results */}
-        <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="arena-panel arena-panel-left" style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
             {(['problem', 'results'] as const).map(tab => (
@@ -435,7 +435,7 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
                 <div className="label" style={{ marginBottom: 12 }}>EXAMPLES</div>
                 {task.examples.map((ex, i) => (
                   <div key={i} style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+                    <div className="arena-examples-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
                       <div style={{ padding: '10px 12px', borderRight: '1px solid var(--border)' }}>
                         <div className="label" style={{ fontSize: 9, marginBottom: 6 }}>INPUT</div>
                         <pre style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>{ex.input}</pre>
@@ -454,7 +454,7 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
                 ))}
 
                 {(task.time_limit > 0 || task.memory_limit > 0) && (
-                  <div style={{ marginTop: 12, display: 'flex', gap: 16 }}>
+                  <div className="arena-stat-row" style={{ marginTop: 12, display: 'flex', gap: 16 }}>
                     {task.time_limit > 0 && (
                       <span style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)' }}>
                         ⏱ {task.time_limit}s
@@ -552,7 +552,7 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         </div>
 
         {/* CENTER — Code Editor */}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="arena-panel arena-panel-center" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Editor toolbar */}
           <div style={{
             height: 40, background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)',
@@ -632,7 +632,7 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         </div>
 
         {/* RIGHT — Live Leaderboard */}
-        <div style={{ borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="arena-panel arena-panel-right" style={{ borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{
             padding: '12px 16px', borderBottom: '1px solid var(--border)',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
