@@ -1,10 +1,52 @@
 // api/index.ts — Code Zone API Service Layer
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws';
+const BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const WS_BASE_URL = (() => {
+  const explicit = import.meta.env.VITE_WS_URL;
+  if (explicit) return explicit;
+
+  const apiBase = import.meta.env.VITE_API_URL;
+  if (apiBase) {
+    try {
+      const apiUrl = new URL(apiBase, window.location.origin);
+      const protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${apiUrl.host}`;
+    } catch {
+      // fall through to the current origin
+    }
+  }
+
+  if (import.meta.env.DEV) {
+    return `${location.protocol === 'https:' ? 'wss' : 'ws'}://localhost:8000`;
+  }
+
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+})();
 
 // ─── Auth helpers ─────────────────────────────────────────────
-const getToken = (): string | null => localStorage.getItem('cz_token');
+const joinUrl = (base: string, path: string): string => {
+  const baseTrimmed = base.replace(/\/+$/, '');
+  const pathNormalized = path.startsWith('/') ? path : `/${path}`;
+  return `${baseTrimmed}${pathNormalized}`;
+};
+
+const getToken = (): string | null => {
+  const direct = localStorage.getItem('cz_token');
+  if (direct) return direct;
+  try {
+    const storedUser = localStorage.getItem('cz_user');
+    if (!storedUser) return null;
+    const parsed = JSON.parse(storedUser) as { token?: string } | null;
+    const token = parsed?.token;
+    if (token) {
+      localStorage.setItem('cz_token', token);
+      return token;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+};
 
 const headers = (extra: Record<string, string> = {}): HeadersInit => ({
   'Content-Type': 'application/json',
@@ -12,43 +54,167 @@ const headers = (extra: Record<string, string> = {}): HeadersInit => ({
   ...extra,
 });
 
+const sanitizeErrorDetail = (detail: string): string => {
+  const trimmed = (detail || '').trim();
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('<!doctype html') ||
+    lower.includes('<html') ||
+    lower.includes('<head') ||
+    lower.includes('<body')
+  ) {
+    return 'Server error';
+  }
+  const maxLen = 240;
+  return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}…` : trimmed;
+};
+
 const req = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: { ...headers(), ...((options.headers as any) || {}) },
-  });
+  const doFetch = () =>
+    fetch(joinUrl(BASE_URL, path), {
+      ...options,
+      headers: { ...headers(), ...((options.headers as any) || {}) },
+    });
+
+  let res = await doFetch();
+  if (res.status === 401) {
+    const refresh = localStorage.getItem('cz_refresh');
+    if (refresh) {
+      try {
+        const refreshed = await fetch(joinUrl(BASE_URL, '/auth/refresh/'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh }),
+        });
+        if (refreshed.ok) {
+          const data = (await refreshed.json()) as { access: string };
+          if (data?.access) localStorage.setItem('cz_token', data.access);
+          res = await doFetch();
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Network error' }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    if (res.status === 401) {
+      localStorage.removeItem('cz_token');
+      localStorage.removeItem('cz_refresh');
+      localStorage.removeItem('cz_user');
+      try {
+        window.dispatchEvent(new CustomEvent('cz_auth_invalid'));
+      } catch {
+        // ignore
+      }
+    }
+    let err: any;
+    try {
+      err = await res.clone().json();
+    } catch {
+      const text = await res.text().catch(() => '');
+      err = { detail: text || 'Network error' };
+    }
+    const detail =
+      typeof (err as any)?.detail === 'string'
+        ? (err as any).detail
+        : typeof err === 'string'
+          ? err
+          : err && typeof err === 'object'
+            ? Object.values(err as any)
+              .flat()
+              .filter(Boolean)
+              .map((v) => (typeof v === 'string' ? v : JSON.stringify(v)))
+              .join('; ')
+            : '';
+    throw new Error(sanitizeErrorDetail(detail) || `HTTP ${res.status}`);
   }
   return res.json();
 };
 
+type ListResponse<T> = { results: T[]; count: number };
+
+const normalizeListResponse = <T>(data: any): ListResponse<T> => {
+  if (Array.isArray(data)) return { results: data as T[], count: data.length };
+  const results = (data as any)?.results;
+  if (Array.isArray(results)) {
+    const count = typeof (data as any)?.count === 'number' ? (data as any).count : results.length;
+    return { results: results as T[], count };
+  }
+  return { results: [], count: 0 };
+};
+
 // ─── Types ───────────────────────────────────────────────────
-export interface LoginPayload { username: string; password: string; }
+export interface LoginPayload { email: string; password: string; }
 export interface RegisterPayload { username: string; email: string; password: string; }
-export interface AuthResponse { access: string; refresh: string; user: UserProfile; }
-export interface UserProfile { id: string; username: string; email: string; wins: number; total_matches: number; }
+export interface TokenPair { access: string; refresh: string; }
+export interface AuthResponse extends TokenPair { user: UserProfile; }
+export interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  is_staff?: boolean;
+}
 
 export interface Room {
-  id: string; name: string; host_id: string;
-  max_players: number; current_players: number;
-  is_private: boolean; rounds: number;
-  difficulty: 'easy' | 'medium' | 'hard';
-  status: 'waiting' | 'in_progress' | 'finished';
+  id: number;
+  name: string;
+  creator: UserProfile;
+  is_private: boolean;
+  max_players: number;
+  round_count: number;
+  status: 'waiting' | 'running' | 'finished';
+  players: RoomMembership[];
+  player_count: number;
+  current_match?: {
+    id: number;
+    status: 'waiting' | 'running' | 'finished';
+    started_at: string | null;
+    finished_at: string | null;
+    current_round: null | {
+      id: number;
+      number: number;
+      status: 'pending' | 'running' | 'finished';
+      started_at: string | null;
+      ended_at: string | null;
+    };
+  } | null;
+  round_duration_seconds?: number;
+  selected_task_ids?: number[];
+  chat_messages?: RoomChatMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomMembership {
+  id: number;
+  user: UserProfile;
+  is_ready: boolean;
+  status: 'active' | 'left';
+  joined_at: string | null;
+  left_at: string | null;
+}
+
+export interface RoomChatMessage {
+  id: number;
+  user: UserProfile;
+  message: string;
   created_at: string;
 }
 
-export interface RoomPlayer {
-  id: string; username: string; is_ready: boolean;
-  is_admin: boolean; is_eliminated: boolean;
-  score: number; current_round: number;
-}
+export type RoomDetail = Room;
 
-export interface RoomDetail extends Room {
-  players: RoomPlayer[];
-  current_round: number;
-  task?: Task;
+// UI-friendly player shape used by some screens (not a direct backend model)
+export interface RoomPlayer {
+  id: number | string;
+  username: string;
+  is_ready: boolean;
+  is_admin: boolean;
+  is_eliminated?: boolean;
+  score?: number;
+  current_round?: number;
 }
 
 export interface Task {
@@ -58,36 +224,107 @@ export interface Task {
   difficulty: 'easy' | 'medium' | 'hard';
   time_limit: number; memory_limit: number;
   visible_tests: { input: string; output: string }[];
+  hidden_tests?: { input: string; output: string }[];
+  hidden_tests_count?: number;
 }
 
 export interface Submission {
-  id: string; player_id: string; room_id: string;
-  round_number: number; code: string; language: string;
+  id: number;
+  user: UserProfile;
+  match: number;
+  round: number;
+  task: number;
+  code: string;
   status: 'pending' | 'accepted' | 'wrong_answer' | 'runtime_error' | 'time_limit_exceeded' | 'compilation_error';
-  execution_time?: number; memory_used?: number;
-  test_results?: { passed: boolean; input: string; expected: string; got?: string }[];
+  execution_time: number;
+  test_results: {
+    name?: string;
+    hidden?: boolean;
+    status?: string;
+    passed: boolean;
+    execution_time?: number;
+    input?: string | null;
+    expected_output?: string | null;
+    stdout?: string;
+    stderr?: string;
+  }[];
   submitted_at: string;
+  moderated_by?: UserProfile | null;
+  moderated_at?: string | null;
+  manual_decision?: string | null;
 }
 
 export interface MatchResult {
-  room_id: string; winner: RoomPlayer;
-  players: (RoomPlayer & { final_rank: number; solved_rounds: number })[];
+  room_id: number;
+  winner: { id: number; username: string } | null;
+  players: { id: number; username: string; final_rank: number; solved_rounds: number; is_eliminated: boolean }[];
   duration_seconds: number; finished_at: string;
 }
 
+export interface LeaderboardEntry {
+  user_id: number;
+  username?: string;
+  user?: UserProfile;
+  id?: number;
+  points: number;
+  solved_count: number;
+  total_solution_time: number;
+  player_status: string;
+  eliminated: boolean;
+  last_submission_status: string;
+}
+
+export interface Match {
+  id: number;
+  room: number;
+  status: 'waiting' | 'running' | 'finished';
+  current_round: null | {
+    id: number;
+    number: number;
+    status: 'pending' | 'running' | 'finished';
+    task: Task;
+    started_at: string | null;
+    ended_at: string | null;
+    players: {
+      id: number;
+      user: UserProfile;
+      status: string;
+      solved_at: string | null;
+      time_spent: number;
+    }[];
+  };
+  rounds: any[];
+  participants: any[];
+  winner: UserProfile | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface CreateRoomPayload {
-  name: string; max_players: number;
-  is_private: boolean; password?: string;
-  rounds: number; difficulty: 'easy' | 'medium' | 'hard';
+  name: string;
+  max_players: number;
+  round_count: number;
+  is_private: boolean;
+  password?: string;
 }
 
 // ─── Auth API ─────────────────────────────────────────────────
 export const authApi = {
-  login: (data: LoginPayload) =>
-    req<AuthResponse>('/auth/login/', { method: 'POST', body: JSON.stringify(data) }),
+  login: async (data: LoginPayload): Promise<AuthResponse> => {
+    const tokens = await req<TokenPair>('/auth/login/', { method: 'POST', body: JSON.stringify(data) });
+    localStorage.setItem('cz_token', tokens.access);
+    localStorage.setItem('cz_refresh', tokens.refresh);
+    const user = await req<UserProfile>('/auth/me/');
+    return { ...tokens, user };
+  },
 
-  register: (data: RegisterPayload) =>
-    req<AuthResponse>('/auth/register/', { method: 'POST', body: JSON.stringify(data) }),
+  register: async (data: RegisterPayload): Promise<AuthResponse> => {
+    const res = await req<AuthResponse>('/auth/register/', { method: 'POST', body: JSON.stringify(data) });
+    localStorage.setItem('cz_token', res.access);
+    localStorage.setItem('cz_refresh', res.refresh);
+    return res;
+  },
 
   refresh: (refresh: string) =>
     req<{ access: string }>('/auth/refresh/', { method: 'POST', body: JSON.stringify({ refresh }) }),
@@ -99,7 +336,7 @@ export const authApi = {
 export const roomsApi = {
   list: (params?: { page?: number; difficulty?: string }) => {
     const qs = new URLSearchParams(params as any).toString();
-    return req<{ results: Room[]; count: number }>(`/rooms/?${qs}`);
+    return req<any>(`/rooms/?${qs}`).then(normalizeListResponse<Room>);
   },
 
   create: (data: CreateRoomPayload) =>
@@ -107,19 +344,33 @@ export const roomsApi = {
 
   get: (id: string) => req<RoomDetail>(`/rooms/${id}/`),
 
+  myActive: () => req<RoomDetail | null>('/rooms/my-active/'),
+
   join: (id: string, password?: string) =>
-    req<{ success: boolean }>(`/rooms/${id}/join/`, {
+    req<RoomDetail>(`/rooms/${id}/join/`, {
       method: 'POST',
       body: JSON.stringify({ password }),
     }),
 
   leave: (id: string) =>
-    req<{ success: boolean }>(`/rooms/${id}/leave/`, { method: 'POST' }),
+    req<void>(`/rooms/${id}/leave/`, { method: 'POST' }),
 
-  setReady: (id: string, ready: boolean) =>
-    req<{ success: boolean }>(`/rooms/${id}/ready/`, {
+  disband: (id: string) =>
+    req<void>(`/rooms/${id}/disband/`, { method: 'POST' }),
+
+  ready: (id: string) => req<RoomDetail>(`/rooms/${id}/ready/`, { method: 'POST' }),
+  unready: (id: string) => req<RoomDetail>(`/rooms/${id}/unready/`, { method: 'POST' }),
+
+  updateRoundCount: (id: string, roundCount: number) =>
+    req<RoomDetail>(`/rooms/${id}/admin/config/`, {
       method: 'POST',
-      body: JSON.stringify({ ready }),
+      body: JSON.stringify({ round_count: roundCount }),
+    }),
+
+  startMatch: (id: string, taskIds?: number[]) =>
+    req<any>(`/rooms/${id}/start-match/`, {
+      method: 'POST',
+      body: JSON.stringify(taskIds ? { task_ids: taskIds } : {}),
     }),
 };
 
@@ -141,7 +392,7 @@ export const adminApi = {
     }),
 
   selectTask: (roomId: string, taskId: string) =>
-    req<{ success: boolean }>(`/rooms/${roomId}/admin/task/`, {
+    req<{ success: boolean; task_ids?: number[] }>(`/rooms/${roomId}/admin/task/`, {
       method: 'POST',
       body: JSON.stringify({ task_id: taskId }),
     }),
@@ -166,7 +417,7 @@ export const adminApi = {
 export const tasksApi = {
   list: (params?: { difficulty?: string; page?: number }) => {
     const qs = new URLSearchParams(params as any).toString();
-    return req<{ results: Task[]; count: number }>(`/tasks/?${qs}`);
+    return req<any>(`/tasks/?${qs}`).then(normalizeListResponse<Task>);
   },
 
   get: (id: string) => req<Task>(`/tasks/${id}/`),
@@ -177,16 +428,22 @@ export const tasksApi = {
 
 // ─── Submissions API ──────────────────────────────────────────
 export const submissionsApi = {
-  submit: (roomId: string, code: string, language: string = 'python3') =>
-    req<Submission>(`/rooms/${roomId}/submit/`, {
+  submit: (matchId: number, roundId: number | null, code: string) =>
+    req<Submission>('/submissions/', {
       method: 'POST',
-      body: JSON.stringify({ code, language }),
+      body: JSON.stringify({
+        match_id: matchId,
+        ...(roundId ? { round_id: roundId } : {}),
+        code,
+      }),
     }),
+
+  list: () => req<Submission[]>('/submissions/'),
 
   get: (id: string) => req<Submission>(`/submissions/${id}/`),
 
-  mySubmissions: (roomId: string) =>
-    req<Submission[]>(`/rooms/${roomId}/my_submissions/`),
+  accept: (id: number) => req<Submission>(`/submissions/${id}/accept/`, { method: 'POST' }),
+  reject: (id: number) => req<Submission>(`/submissions/${id}/reject/`, { method: 'POST' }),
 };
 
 // ─── Match Results API ────────────────────────────────────────
@@ -194,9 +451,16 @@ export const matchApi = {
   getResult: (roomId: string) => req<MatchResult>(`/rooms/${roomId}/result/`),
 };
 
+export const matchesApi = {
+  get: (matchId: number) => req<Match>(`/matches/${matchId}/`),
+  currentRound: (matchId: number) => req<Match['current_round']>(`/matches/${matchId}/current-round/`),
+  leaderboard: (matchId: number) => req<LeaderboardEntry[]>(`/matches/${matchId}/leaderboard/`),
+  tick: (matchId: number) => req<Match>(`/matches/${matchId}/tick/`, { method: 'POST' }),
+};
+
 // ─── WebSocket Factory ────────────────────────────────────────
 export const createRoomWS = (roomId: string, token: string): WebSocket => {
-  return new WebSocket(`${WS_URL}/room/${roomId}/?token=${token}`);
+  return new WebSocket(`${WS_BASE_URL}/ws/rooms/${encodeURIComponent(roomId)}/?token=${encodeURIComponent(token)}`);
 };
 
 // ─── WS Event Types ───────────────────────────────────────────
@@ -211,11 +475,13 @@ export type WSEventType =
   | 'solution_accepted'
   | 'solution_rejected'
   | 'match_finished'
+  | 'room_disbanded'
   | 'chat_message'
   | 'error';
 
 export interface WSEvent {
-  type: WSEventType;
+  event?: WSEventType | string;
+  type?: WSEventType | string;
   payload: any;
-  timestamp: string;
+  timestamp?: string;
 }

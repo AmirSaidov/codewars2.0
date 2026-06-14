@@ -17,11 +17,12 @@ export const useTheme = () => useContext(ThemeContext);
 
 // ===== context/AuthContext.tsx =====
 export interface User {
-  id: string;
+  id: string | number;
   username: string;
   email: string;
   avatar?: string;
   token: string;
+  is_staff?: boolean;
 }
 
 export interface AuthContextType {

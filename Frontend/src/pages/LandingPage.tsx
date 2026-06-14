@@ -2,19 +2,33 @@
 import React, { useEffect, useState } from 'react';
 import type { Page } from '../App';
 import { useTheme } from '../context/contexts';
+import { BarChart3, Palette, Shield, Sword, Trophy, Zap } from 'lucide-react';
 
 interface Props { navigate: (p: Page) => void; }
 
 const features = [
-  { icon: '⚔️', title: 'Battle Arenas', desc: 'Real-time multiplayer coding battles up to 10 players' },
-  { icon: '🏆', title: 'Survival Rounds', desc: 'Each round eliminates the slowest — last coder standing wins' },
-  { icon: '🔥', title: 'Live Leaderboard', desc: 'Watch rankings shift in real-time as solutions get submitted' },
-  { icon: '🛡️', title: 'Admin Control', desc: 'Full room moderation with manual override capabilities' },
-  { icon: '🎨', title: '4 Unique Themes', desc: 'STALKER, Cyberpunk, Hacker Terminal, and Minimal' },
-  { icon: '⚡', title: 'Monaco Editor', desc: 'VS Code-grade editor with syntax highlighting & autocomplete' },
+  { title: 'Battle Arenas', desc: 'Real-time multiplayer coding battles up to 10 players' },
+  { title: 'Survival Rounds', desc: 'Each round eliminates the slowest — last coder standing wins' },
+  { title: 'Live Leaderboard', desc: 'Watch rankings shift in real-time as solutions get submitted' },
+  { title: 'Admin Control', desc: 'Full room moderation with manual override capabilities' },
+  { title: '4 Unique Themes', desc: 'STALKER, Cyberpunk, Hacker Terminal, and Minimal' },
+  { title: 'Monaco Editor', desc: 'VS Code-grade editor with syntax highlighting & autocomplete' },
 ];
 
 const GLITCH_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&';
+
+const FeatureIcon: React.FC<{ title: string }> = ({ title }) => {
+  const props = { size: 28, strokeWidth: 2.2 } as const;
+  switch (title) {
+    case 'Battle Arenas': return <Sword {...props} />;
+    case 'Survival Rounds': return <Trophy {...props} />;
+    case 'Live Leaderboard': return <BarChart3 {...props} />;
+    case 'Admin Control': return <Shield {...props} />;
+    case '4 Unique Themes': return <Palette {...props} />;
+    case 'Monaco Editor': return <Zap {...props} />;
+    default: return <Zap {...props} />;
+  }
+};
 
 const useGlitch = (text: string, active: boolean) => {
   const [display, setDisplay] = useState(text);
@@ -155,7 +169,9 @@ const LandingPage: React.FC<Props> = ({ navigate }) => {
           <div className="grid-3" style={{ gap: 20 }}>
             {features.map((f, i) => (
               <div key={f.title} className="card" style={{ animationDelay: `${i * 0.1}s` }}>
-                <div style={{ fontSize: 28, marginBottom: 12 }}>{f.icon}</div>
+                <div style={{ marginBottom: 12, color: 'var(--accent)' }}>
+                  <FeatureIcon title={f.title} />
+                </div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 2, color: 'var(--text-accent)', marginBottom: 8 }}>
                   {f.title}
                 </div>

@@ -2,8 +2,9 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .serializers import RegisterSerializer, UserSerializer
+from .serializers import RegisterSerializer, UserSerializer, EmailTokenObtainPairSerializer
 
 
 class RegisterView(APIView):
@@ -29,3 +30,7 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+
+
+class EmailLoginView(TokenObtainPairView):
+    serializer_class = EmailTokenObtainPairSerializer

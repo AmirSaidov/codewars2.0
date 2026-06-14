@@ -143,18 +143,27 @@ REST_FRAMEWORK = {
 
 ASGI_APPLICATION = 'code_zone.asgi.application' 
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [
-                (
-                    os.getenv('REDIS_HOST', '127.0.0.1'),
-                    int(os.getenv('REDIS_PORT', 6379)),
-                )
-            ],
+USE_REDIS_CHANNEL_LAYER = os.getenv('USE_REDIS_CHANNEL_LAYER') == '1'
+REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
+REDIS_PORT = os.getenv('REDIS_PORT', '6379')
+
+if USE_REDIS_CHANNEL_LAYER:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [(REDIS_HOST, int(REDIS_PORT))],
+            },
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        }
+    }
 
 SANDBOX_PYTHON_IMAGE = os.getenv('SANDBOX_PYTHON_IMAGE', 'python:3.11-alpine')
+
+# Match config
+MATCH_ROUND_DURATION_SECONDS = int(os.getenv('MATCH_ROUND_DURATION_SECONDS', '300'))

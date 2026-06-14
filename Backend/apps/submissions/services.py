@@ -1,14 +1,13 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.leaderboard.services import broadcast_leaderboard, sync_match_leaderboard
 from apps.matches.models import Match, MatchParticipant, Round
-from apps.matches.services import mark_player_solved
+from apps.matches.services import auto_advance_if_round_reviewed, mark_player_solved
 from apps.realtime.services import broadcast_room_event
 
 from .models import Submission
-from .sandbox_runner import run_python_code
 
 
 def _ensure_submission_admin(user, submission):
@@ -38,6 +37,9 @@ def submit_code(user, *, match_id, round_id=None, code):
     except Match.DoesNotExist as exc:
         raise ValidationError('Match not found.') from exc
 
+    if match.room.creator_id == user.id:
+        raise ValidationError('Room admin cannot submit solutions.')
+
     if round_id is None:
         round_obj = match.current_round
     else:
@@ -53,24 +55,23 @@ def submit_code(user, *, match_id, round_id=None, code):
 
     _validate_submission_target(user, match, round_obj)
     task = round_obj.task
-    execution_result = run_python_code(
-        code,
-        task.visible_tests,
-        task.hidden_tests,
-        task.time_limit,
-        task.memory_limit,
-    )
 
-    submission = Submission.objects.create(
-        user=user,
-        match=match,
-        round=round_obj,
-        task=task,
-        code=code,
-        status=execution_result['status'],
-        execution_time=execution_result['execution_time'],
-        test_results=execution_result['test_results'],
-    )
+    if Submission.objects.filter(match=match, round=round_obj, user=user).exists():
+        raise ValidationError('You can submit only once per task.')
+
+    try:
+        submission = Submission.objects.create(
+            user=user,
+            match=match,
+            round=round_obj,
+            task=task,
+            code=code,
+            status=Submission.Status.PENDING,
+            execution_time=0,
+            test_results=[],
+        )
+    except IntegrityError as exc:
+        raise ValidationError('You can submit only once per task.') from exc
 
     broadcast_room_event(
         match.room_id,
@@ -83,23 +84,6 @@ def submit_code(user, *, match_id, round_id=None, code):
             'status': submission.status,
         },
     )
-
-    if submission.status == Submission.Status.ACCEPTED:
-        mark_player_solved(submission)
-        broadcast_room_event(
-            match.room_id,
-            'solution_accepted',
-            {
-                'match_id': match.id,
-                'round_id': round_obj.id,
-                'submission_id': submission.id,
-                'user_id': user.id,
-            },
-        )
-        broadcast_leaderboard(match)
-    else:
-        sync_match_leaderboard(match)
-        broadcast_leaderboard(match)
 
     return submission
 
@@ -115,6 +99,8 @@ def accept_submission(admin_user, submission):
     submission.moderated_at = timezone.now()
     submission.save(update_fields=['status', 'manual_decision', 'moderated_by', 'moderated_at'])
 
+    from apps.matches.services import mark_player_solved
+
     mark_player_solved(submission)
     broadcast_room_event(
         submission.match.room_id,
@@ -128,6 +114,7 @@ def accept_submission(admin_user, submission):
         },
     )
     broadcast_leaderboard(submission.match)
+    auto_advance_if_round_reviewed(admin_user, submission.match)
     return submission
 
 
@@ -144,4 +131,5 @@ def reject_submission(admin_user, submission):
 
     sync_match_leaderboard(submission.match)
     broadcast_leaderboard(submission.match)
+    auto_advance_if_round_reviewed(admin_user, submission.match)
     return submission

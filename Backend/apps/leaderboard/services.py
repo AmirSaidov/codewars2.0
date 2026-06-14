@@ -6,7 +6,8 @@ from .models import LeaderboardEntry
 
 def sync_match_leaderboard(match):
     entries = []
-    for participant in match.participants.select_related('user').all():
+    LeaderboardEntry.objects.filter(match=match, user_id=match.room.creator_id).delete()
+    for participant in match.participants.select_related('user').exclude(user_id=match.room.creator_id):
         last_submission = (
             Submission.objects.filter(match=match, user=participant.user)
             .order_by('-submitted_at')
@@ -31,7 +32,7 @@ def sync_match_leaderboard(match):
 
 def get_match_leaderboard(match):
     sync_match_leaderboard(match)
-    return LeaderboardEntry.objects.select_related('user', 'room', 'match').filter(match=match)
+    return LeaderboardEntry.objects.select_related('user', 'room', 'match').filter(match=match).exclude(user_id=match.room.creator_id)
 
 
 def get_room_leaderboard(room):

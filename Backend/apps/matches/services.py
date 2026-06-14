@@ -1,10 +1,15 @@
+import random
+from datetime import timedelta
+
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.coding_tasks.models import CodingTask
 from apps.leaderboard.services import broadcast_leaderboard, sync_match_leaderboard
 from apps.realtime.services import broadcast_room_event
+from apps.submissions.models import Submission
 from apps.rooms.models import Room, RoomMembership
 from apps.rooms.services import ensure_room_admin
 
@@ -12,7 +17,7 @@ from .models import Match, MatchParticipant, Round, RoundParticipant
 
 
 def ensure_match_admin(user, match):
-    if match.room.creator_id != user.id:
+    if match.room.creator_id != user.id and not user.is_staff:
         raise PermissionDenied('Only match room admin can perform this action.')
 
 
@@ -32,6 +37,50 @@ def _load_tasks(task_ids):
     return tasks
 
 
+def _resolve_match_tasks(room, *, task_ids=None, round_count=None):
+    if task_ids:
+        tasks = _load_tasks(task_ids)
+        if round_count is None:
+            return tasks
+        if round_count <= len(tasks):
+            return tasks[:round_count]
+
+        tasks_by_id = {task.id: task for task in tasks}
+        default_tasks = list(
+            CodingTask.objects.exclude(id__in=tasks_by_id.keys()).order_by('difficulty', 'created_at')
+        )
+        for task in default_tasks:
+            tasks.append(task)
+            if len(tasks) >= round_count:
+                return tasks[:round_count]
+        return tasks
+
+    selected_task_ids = list(
+        room.selected_tasks.order_by('position', 'created_at').values_list('task_id', flat=True)
+    )
+    if round_count is None:
+        round_count = int(getattr(room, 'round_count', 5) or 5)
+
+    selected_tasks = list(CodingTask.objects.filter(id__in=selected_task_ids))
+    selected_by_id = {task.id: task for task in selected_tasks}
+    ordered_tasks = [selected_by_id[task_id] for task_id in selected_task_ids if task_id in selected_by_id]
+
+    if len(ordered_tasks) >= round_count:
+        return ordered_tasks[:round_count]
+
+    default_tasks = list(
+        CodingTask.objects.exclude(id__in=[task.id for task in ordered_tasks]).order_by('difficulty', 'created_at')
+    )
+    for task in default_tasks:
+        ordered_tasks.append(task)
+        if len(ordered_tasks) >= round_count:
+            return ordered_tasks[:round_count]
+
+    if not ordered_tasks:
+        raise ValidationError({'task_ids': 'Create at least one coding task before starting a match.'})
+    return ordered_tasks
+
+
 def _create_round_participants(round_obj, participants):
     RoundParticipant.objects.bulk_create(
         [
@@ -43,19 +92,21 @@ def _create_round_participants(round_obj, participants):
 
 
 @transaction.atomic
-def start_match(user, room, task_ids=None):
+def start_match(user, room, task_ids=None, round_count=None):
     room = Room.objects.select_for_update().get(pk=room.pk)
     ensure_room_admin(user, room)
 
     if room.status == Room.Status.RUNNING:
         raise ValidationError('Room already has a running match.')
 
-    tasks = _load_tasks(task_ids)
+    tasks = _resolve_match_tasks(room, task_ids=task_ids, round_count=round_count)
     memberships = list(
         RoomMembership.objects.select_related('user')
         .filter(room=room, status=RoomMembership.Status.ACTIVE)
+        .exclude(user_id=room.creator_id)
         .order_by('joined_at')
     )
+    random.shuffle(memberships)
     if not memberships:
         raise ValidationError('Cannot start a match without active players.')
 
@@ -89,11 +140,32 @@ def start_match(user, room, task_ids=None):
     room.save(update_fields=['status'])
 
     sync_match_leaderboard(match)
-    broadcast_room_event(room.id, 'match_started', {'match_id': match.id, 'room_id': room.id})
+    round_duration_seconds = int(getattr(settings, 'MATCH_ROUND_DURATION_SECONDS', 300))
+    broadcast_room_event(
+        room.id,
+        'match_started',
+        {
+            'match_id': match.id,
+            'room_id': room.id,
+            'started_at': match.started_at,
+            'round_duration_seconds': round_duration_seconds,
+            'current_round': {
+                'round_id': first_round.id,
+                'round_number': first_round.number,
+                'started_at': first_round.started_at,
+            },
+        },
+    )
     broadcast_room_event(
         room.id,
         'round_started',
-        {'match_id': match.id, 'round_id': first_round.id, 'round_number': first_round.number},
+        {
+            'match_id': match.id,
+            'round_id': first_round.id,
+            'round_number': first_round.number,
+            'started_at': first_round.started_at,
+            'round_duration_seconds': round_duration_seconds,
+        },
     )
     broadcast_leaderboard(match)
     return match
@@ -140,8 +212,10 @@ def _finish_match(match, winner=None):
     if winner:
         MatchParticipant.objects.filter(match=match, user=winner).update(status=MatchParticipant.Status.WINNER)
 
-    match.room.status = Room.Status.FINISHED
+    # Return room back to lobby state so players can start again without re-joining.
+    match.room.status = Room.Status.WAITING
     match.room.save(update_fields=['status'])
+    RoomMembership.objects.filter(room=match.room, status=RoomMembership.Status.ACTIVE).update(is_ready=False)
     sync_match_leaderboard(match)
     broadcast_leaderboard(match)
     broadcast_room_event(
@@ -152,10 +226,7 @@ def _finish_match(match, winner=None):
     return match
 
 
-@transaction.atomic
-def advance_round(user, match):
-    match = Match.objects.select_for_update().select_related('room', 'current_round').get(pk=match.pk)
-    ensure_match_admin(user, match)
+def _advance_round_locked(match):
     if match.status != Match.Status.RUNNING:
         raise ValidationError('Match is not running.')
     if not match.current_round:
@@ -207,13 +278,150 @@ def advance_round(user, match):
     match.save(update_fields=['current_round'])
 
     sync_match_leaderboard(match)
+    round_duration_seconds = int(getattr(settings, 'MATCH_ROUND_DURATION_SECONDS', 300))
     broadcast_room_event(
         match.room_id,
         'round_started',
-        {'match_id': match.id, 'round_id': next_round.id, 'round_number': next_round.number},
+        {
+            'match_id': match.id,
+            'round_id': next_round.id,
+            'round_number': next_round.number,
+            'started_at': next_round.started_at,
+            'round_duration_seconds': round_duration_seconds,
+        },
     )
     broadcast_leaderboard(match)
     return match
+
+
+def _all_active_participants_resolved_for_round(match, round_obj):
+    active_participants = list(
+        MatchParticipant.objects.filter(match=match, status=MatchParticipant.Status.ACTIVE).values_list('id', flat=True)
+    )
+    if not active_participants:
+        return True
+
+    resolved_participant_ids = set(
+        RoundParticipant.objects.filter(
+            round=round_obj,
+            participant_id__in=active_participants,
+            status__in=[
+                RoundParticipant.Status.SOLVED,
+                RoundParticipant.Status.PASSED,
+                RoundParticipant.Status.ELIMINATED,
+            ],
+        ).values_list('participant_id', flat=True)
+    )
+    if len(resolved_participant_ids) == len(active_participants):
+        return True
+
+    reviewed_submission_participant_ids = set(
+        MatchParticipant.objects.filter(
+            id__in=active_participants,
+            user__submissions__match=match,
+            user__submissions__round=round_obj,
+            user__submissions__manual_decision__in=[
+                Submission.ManualDecision.ACCEPTED,
+                Submission.ManualDecision.REJECTED,
+            ],
+        ).values_list('id', flat=True)
+    )
+
+    return len(resolved_participant_ids | reviewed_submission_participant_ids) == len(active_participants)
+
+
+@transaction.atomic
+def maybe_auto_advance_round(user, match):
+    match = Match.objects.select_for_update().select_related('room', 'current_round').get(pk=match.pk)
+
+    if match.status != Match.Status.RUNNING or not match.current_round:
+        return match
+
+    is_participant = MatchParticipant.objects.filter(match=match, user=user).exists()
+    if match.room.creator_id != user.id and not user.is_staff and not is_participant:
+        raise PermissionDenied('Not allowed.')
+
+    current_round = match.current_round
+    if current_round.status != Round.Status.RUNNING or not current_round.started_at:
+        return match
+
+    duration_seconds = int(getattr(settings, 'MATCH_ROUND_DURATION_SECONDS', 300))
+    deadline = current_round.started_at + timedelta(seconds=duration_seconds)
+    if timezone.now() < deadline:
+        return match
+
+    return _advance_round_locked(match)
+
+
+@transaction.atomic
+def advance_round(user, match):
+    match = Match.objects.select_for_update().select_related('room', 'current_round').get(pk=match.pk)
+    ensure_match_admin(user, match)
+    return _advance_round_locked(match)
+
+
+@transaction.atomic
+def stop_match(user, match):
+    match = Match.objects.select_for_update().select_related('room').get(pk=match.pk)
+    ensure_match_admin(user, match)
+    if match.status != Match.Status.RUNNING:
+        raise ValidationError('Match is not running.')
+
+    remaining = list(MatchParticipant.objects.filter(match=match, status=MatchParticipant.Status.ACTIVE).select_related('user'))
+    winner = remaining[0].user if len(remaining) == 1 else None
+    return _finish_match(match, winner)
+
+
+@transaction.atomic
+def restart_current_round(user, match):
+    match = Match.objects.select_for_update().select_related('room', 'current_round').get(pk=match.pk)
+    ensure_match_admin(user, match)
+    if match.status != Match.Status.RUNNING or not match.current_round:
+        raise ValidationError('Match is not running.')
+
+    round_obj = match.current_round
+    round_obj.status = Round.Status.RUNNING
+    round_obj.started_at = timezone.now()
+    round_obj.ended_at = None
+    round_obj.save(update_fields=['status', 'started_at', 'ended_at'])
+
+    # Reset non-eliminated round states back to active for a clean restart.
+    RoundParticipant.objects.filter(round=round_obj).exclude(status=RoundParticipant.Status.ELIMINATED).update(status=RoundParticipant.Status.ACTIVE)
+
+    round_duration_seconds = int(getattr(settings, 'MATCH_ROUND_DURATION_SECONDS', 300))
+    broadcast_room_event(
+        match.room_id,
+        'round_started',
+        {
+            'match_id': match.id,
+            'round_id': round_obj.id,
+            'round_number': round_obj.number,
+            'started_at': round_obj.started_at,
+            'round_duration_seconds': round_duration_seconds,
+        },
+    )
+    broadcast_leaderboard(match)
+    return match
+
+
+@transaction.atomic
+def auto_advance_if_round_reviewed(user, match):
+    match = Match.objects.select_for_update().select_related('room', 'current_round').get(pk=match.pk)
+    ensure_match_admin(user, match)
+    if match.status != Match.Status.RUNNING or not match.current_round:
+        return match
+
+    pending_exists = Submission.objects.filter(
+        match=match,
+        round=match.current_round,
+        manual_decision=Submission.ManualDecision.NONE,
+    ).exists()
+    if pending_exists:
+        return match
+    if not _all_active_participants_resolved_for_round(match, match.current_round):
+        return match
+
+    return _advance_round_locked(match)
 
 
 @transaction.atomic

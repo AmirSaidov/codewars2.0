@@ -1,5 +1,6 @@
 // pages/LoginPage.tsx
 import React, { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import type { Page } from '../App';
 import type { User } from '../context/contexts';
 import { authApi } from '../api';
@@ -9,18 +10,56 @@ interface Props {
   onLogin: (u: User) => void;
 }
 
+type PasswordFieldProps = {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (next: string) => void;
+  onEnter: () => void;
+};
+
+const PasswordField: React.FC<PasswordFieldProps> = ({ label, value, placeholder, onChange, onEnter }) => {
+  const [show, setShow] = useState(false);
+  const visible = show;
+
+  return (
+    <div className="form-group">
+      <label className="label">{label}</label>
+      <div className="password-field">
+        <input
+          className="input password-input"
+          type={visible ? 'text' : 'password'}
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && onEnter()}
+        />
+        <button
+          type="button"
+          className="password-peek"
+          aria-label={visible ? 'Hide password' : 'Show password'}
+          aria-pressed={show}
+          onClick={() => setShow((v) => !v)}
+        >
+          <span className="password-peek-icon" aria-hidden="true">
+            {visible ? <EyeOff size={16} /> : <Eye size={16} />}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const LoginPage: React.FC<Props> = ({ navigate, onLogin }) => {
-  const [form, setForm] = useState({ username: '', password: '' });
+  const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!form.username || !form.password) { setError('Fill all fields'); return; }
+    if (!form.email || !form.password) { setError('Fill all fields'); return; }
     setLoading(true); setError('');
     try {
       const res = await authApi.login(form);
-      localStorage.setItem('cz_token', res.access);
-      localStorage.setItem('cz_refresh', res.refresh);
       onLogin({ ...res.user, token: res.access });
     } catch (e: any) {
       setError(e.message || 'Invalid credentials');
@@ -45,26 +84,25 @@ export const LoginPage: React.FC<Props> = ({ navigate, onLogin }) => {
 
           <div className="card card-glow">
             <div className="form-group">
-              <label className="label">Username</label>
+              <label className="label">Email</label>
               <input
                 className="input"
-                placeholder="your_codename"
-                value={form.username}
-                onChange={e => setForm(p => ({ ...p, username: e.target.value }))}
+                type="email"
+                placeholder="operative@zone.com"
+                value={form.email}
+                onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
                 onKeyDown={e => e.key === 'Enter' && handleSubmit()}
               />
             </div>
-            <div className="form-group">
-              <label className="label">Password</label>
-              <input
-                className="input"
-                type="password"
-                placeholder="••••••••"
-                value={form.password}
-                onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
-                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              />
-            </div>
+
+            <PasswordField
+              label="Password"
+              placeholder="••••••••"
+              value={form.password}
+              onChange={(password) => setForm((p) => ({ ...p, password }))}
+              onEnter={handleSubmit}
+            />
+
             {error && <div className="form-error" style={{ marginBottom: 16 }}>{error}</div>}
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleSubmit} disabled={loading}>
               {loading ? 'AUTHENTICATING...' : 'ENTER THE ZONE'}
@@ -80,10 +118,8 @@ export const LoginPage: React.FC<Props> = ({ navigate, onLogin }) => {
             </button>
           </p>
 
-          {/* Demo hint */}
           <div style={{ marginTop: 24, padding: '12px 16px', border: '1px solid var(--border)', borderRadius: 2, fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-code)' }}>
-            <div style={{ marginBottom: 4, color: 'var(--accent)', letterSpacing: 2, fontSize: 10, fontFamily: 'var(--font-display)' }}>DEMO ACCOUNT</div>
-            username: demo_player<br />password: demo1234
+            Sign in using the email you registered with.
           </div>
         </div>
       </div>
@@ -93,9 +129,7 @@ export const LoginPage: React.FC<Props> = ({ navigate, onLogin }) => {
 
 export default LoginPage;
 
-// ─────────────────────────────────────────────────────────────────
 // pages/RegisterPage.tsx
-// ─────────────────────────────────────────────────────────────────
 export const RegisterPage: React.FC<Props> = ({ navigate, onLogin }) => {
   const [form, setForm] = useState({ username: '', email: '', password: '', confirm: '' });
   const [error, setError] = useState('');
@@ -104,12 +138,10 @@ export const RegisterPage: React.FC<Props> = ({ navigate, onLogin }) => {
   const handleSubmit = async () => {
     if (!form.username || !form.email || !form.password) { setError('Fill all fields'); return; }
     if (form.password !== form.confirm) { setError('Passwords do not match'); return; }
-    if (form.password.length < 6) { setError('Password min 6 characters'); return; }
+    if (form.password.length < 8) { setError('Password min 8 characters'); return; }
     setLoading(true); setError('');
     try {
       const res = await authApi.register({ username: form.username, email: form.email, password: form.password });
-      localStorage.setItem('cz_token', res.access);
-      localStorage.setItem('cz_refresh', res.refresh);
       onLogin({ ...res.user, token: res.access });
     } catch (e: any) {
       setError(e.message || 'Registration failed');
@@ -133,24 +165,45 @@ export const RegisterPage: React.FC<Props> = ({ navigate, onLogin }) => {
           </div>
 
           <div className="card card-glow">
-            {[
-              { key: 'username', label: 'Username', placeholder: 'your_codename', type: 'text' },
-              { key: 'email', label: 'Email', placeholder: 'operative@zone.com', type: 'email' },
-              { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password' },
-              { key: 'confirm', label: 'Confirm Password', placeholder: '••••••••', type: 'password' },
-            ].map(field => (
-              <div key={field.key} className="form-group">
-                <label className="label">{field.label}</label>
-                <input
-                  className="input"
-                  type={field.type}
-                  placeholder={field.placeholder}
-                  value={(form as any)[field.key]}
-                  onChange={e => setForm(p => ({ ...p, [field.key]: e.target.value }))}
-                  onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-                />
-              </div>
-            ))}
+            <div className="form-group">
+              <label className="label">Username</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="your_codename"
+                value={form.username}
+                onChange={e => setForm(p => ({ ...p, username: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              />
+            </div>
+            <div className="form-group">
+              <label className="label">Email</label>
+              <input
+                className="input"
+                type="email"
+                placeholder="operative@zone.com"
+                value={form.email}
+                onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              />
+            </div>
+
+            <PasswordField
+              label="Password"
+              placeholder="••••••••"
+              value={form.password}
+              onChange={(password) => setForm((p) => ({ ...p, password }))}
+              onEnter={handleSubmit}
+            />
+
+            <PasswordField
+              label="Confirm Password"
+              placeholder="••••••••"
+              value={form.confirm}
+              onChange={(confirm) => setForm((p) => ({ ...p, confirm }))}
+              onEnter={handleSubmit}
+            />
+
             {error && <div className="form-error" style={{ marginBottom: 16 }}>{error}</div>}
             <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleSubmit} disabled={loading}>
               {loading ? 'CREATING PROFILE...' : 'JOIN THE ZONE'}

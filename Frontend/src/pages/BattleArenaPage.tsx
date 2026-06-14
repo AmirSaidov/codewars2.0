@@ -2,40 +2,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { Page } from '../App';
 import type { User } from '../context/contexts';
-import { submissionsApi, createRoomWS } from '../api';
-import type { WSEvent, Task, RoomPlayer, Submission } from '../api';
+import { submissionsApi, roomsApi, matchesApi, matchApi, createRoomWS } from '../api';
+import type { WSEvent, Task, Submission, LeaderboardEntry, Match } from '../api';
+import { Zap } from 'lucide-react';
 
 interface Props {
-  navigate: (p: Page, roomId?: string) => void;
+  navigate: (p: Page, roomId?: string | number) => void;
   user: User | null;
   roomId: string | null;
 }
 
-const MOCK_TASK: Task = {
-  id: 't1',
-  title: 'Two Sum',
-  description: `Given an array of integers \`nums\` and an integer \`target\`, return indices of the two numbers such that they add up to target.\n\nYou may assume that each input would have exactly one solution, and you may not use the same element twice.\n\nYou can return the answer in any order.`,
-  input_format: 'First line: space-separated integers\nSecond line: target integer',
-  output_format: 'Two space-separated integers (0-indexed positions)',
-  examples: [
-    { input: '[2,7,11,15]\n9', output: '[0,1]', explanation: 'nums[0] + nums[1] = 2 + 7 = 9' },
-    { input: '[3,2,4]\n6', output: '[1,2]' },
-  ],
-  visible_tests: [
-    { input: '[2,7,11,15]\n9', output: '[0,1]' },
-    { input: '[3,2,4]\n6', output: '[1,2]' },
-  ],
-  difficulty: 'easy',
-  time_limit: 2,
-  memory_limit: 256,
-};
 
-const MOCK_PLAYERS: (RoomPlayer & { submit_time?: number })[] = [
-  { id: 'p1', username: 'ghost_sniper', is_ready: true, is_admin: true, is_eliminated: false, score: 0, current_round: 1, submit_time: 45 },
-  { id: 'p2', username: 'dark_coder', is_ready: true, is_admin: false, is_eliminated: false, score: 0, current_round: 1 },
-  { id: 'p3', username: 'void_runner', is_ready: true, is_admin: false, is_eliminated: true, score: 0, current_round: 1 },
-  { id: 'p4', username: 'neon_blade', is_ready: true, is_admin: false, is_eliminated: false, score: 0, current_round: 1 },
-];
 
 const DEFAULT_CODE = `def solution(nums, target):
     # Write your solution here
@@ -70,25 +47,157 @@ const useTimer = (initial: number) => {
   return time;
 };
 
+const useCountdownSeconds = (params: {
+  durationSeconds: number;
+  startedAtISO: string | null | undefined;
+}) => {
+  const { durationSeconds, startedAtISO } = params;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const startedMs = startedAtISO ? Date.parse(startedAtISO) : NaN;
+  if (!Number.isFinite(startedMs)) return null;
+
+  const elapsedSeconds = Math.floor((nowMs - startedMs) / 1000);
+  return Math.max(0, durationSeconds - elapsedSeconds);
+};
+
 const formatTime = (s: number) => {
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
 };
 
+const formatMs = (seconds: number | null | undefined) => {
+  if (typeof seconds !== 'number') return '—';
+  return `${Math.round(seconds * 1000)}ms`;
+};
+
 const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
   const [code, setCode] = useState(DEFAULT_CODE);
-  const [players, setPlayers] = useState(MOCK_PLAYERS);
-  const [task] = useState<Task>(MOCK_TASK);
+  const [matchId, setMatchId] = useState<number | null>(null);
+  const [roundId, setRoundId] = useState<number | null>(null);
+  const [players, setPlayers] = useState<LeaderboardEntry[]>([]);
+  const [task, setTask] = useState<Task>(() => ({
+    id: 'loading',
+    title: 'LOADING...',
+    description: '',
+    input_format: '',
+    output_format: '',
+    examples: [],
+    visible_tests: [],
+    difficulty: 'easy',
+    time_limit: 0,
+    memory_limit: 0,
+  }));
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitLocked, setSubmitLocked] = useState(false);
+  const [editorScrollTop, setEditorScrollTop] = useState(0);
+  const scrollRafRef = useRef<number | null>(null);
+  const [timeUp, setTimeUp] = useState(false);
+  const timeUpTickedRef = useRef<string | null>(null);
   const [round, setRound] = useState(1);
-  const [totalRounds] = useState(3);
+  const [totalRounds, setTotalRounds] = useState(1);
   const [activeTab, setActiveTab] = useState<'problem' | 'results'>('problem');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const time = useTimer(300); // 5 min
+  const [roundDurationSeconds, setRoundDurationSeconds] = useState(300);
+  const [roundStartedAtISO, setRoundStartedAtISO] = useState<string | null>(null);
+  const serverTime = useCountdownSeconds({ durationSeconds: roundDurationSeconds, startedAtISO: roundStartedAtISO });
+  const fallbackTime = useTimer(300);
+  const time = serverTime ?? fallbackTime;
 
   const timerClass = time < 30 ? 'critical' : time < 60 ? 'warning' : '';
+
+  // Lobby host (creator) should not enter the arena/IDE.
+  useEffect(() => {
+    if (!roomId || !user?.id) return;
+    roomsApi.get(String(roomId)).then((r) => {
+      if (r?.creator?.id !== undefined && String(r.creator.id) === String(user.id)) {
+        navigate('admin', roomId);
+      }
+    }).catch(() => {});
+  }, [roomId, user?.id, navigate]);
+
+  const leaveMatch = async () => {
+    if (!roomId) return;
+    try { await roomsApi.leave(String(roomId)); } catch {}
+    localStorage.removeItem('cz_room_id');
+    localStorage.setItem('cz_page', 'dashboard');
+    navigate('dashboard');
+  };
+
+  const applyMatchSnapshot = useCallback((match: Match) => {
+    setTotalRounds(Array.isArray(match.rounds) && match.rounds.length > 0 ? match.rounds.length : 1);
+    const current = match.current_round;
+    setRound(current?.number ?? 1);
+    setRoundId(current?.id ?? null);
+    if (current?.task) setTask(current.task);
+    setRoundStartedAtISO(current?.started_at ?? null);
+  }, []);
+
+  const applyLeaderboard = useCallback((entries: LeaderboardEntry[]) => {
+    setPlayers(Array.isArray(entries) ? entries : []);
+  }, []);
+
+  // Load match/round/task + leaderboard so refresh doesn't reset state
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // Room status/match can race right after "start" click; retry a bit before bouncing back to lobby.
+        let room = await roomsApi.get(String(roomId));
+        if (cancelled) return;
+        const isRoomAdmin = Boolean(user?.is_staff) || (room?.creator?.id !== undefined && user?.id !== null && String(room.creator.id) === String(user?.id));
+        if (isRoomAdmin) {
+          navigate('admin', roomId || undefined);
+          return;
+        }
+        for (let attempt = 0; attempt < 5 && room?.status === 'running' && !room.current_match?.id; attempt++) {
+          await new Promise((r) => setTimeout(r, 400));
+          room = await roomsApi.get(String(roomId));
+          if (cancelled) return;
+        }
+
+        const duration = typeof room.round_duration_seconds === 'number' ? room.round_duration_seconds : 300;
+        setRoundDurationSeconds(duration);
+
+        const runningMatchId = room.current_match?.id ?? null;
+        if (!runningMatchId) {
+          let result = null as Awaited<ReturnType<typeof matchApi.getResult>> | null;
+          for (let attempt = 0; attempt < 5 && !result; attempt++) {
+            result = await matchApi.getResult(String(roomId)).catch(() => null);
+            if (!result && attempt < 4) {
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+          }
+          if (result) {
+            navigate('results', roomId || undefined);
+          } else {
+            navigate('lobby', roomId || undefined);
+          }
+          return;
+        }
+        setMatchId(runningMatchId);
+
+        const match = await matchesApi.get(runningMatchId);
+        if (cancelled) return;
+        applyMatchSnapshot(match);
+
+        const leaderboard = await matchesApi.leaderboard(runningMatchId);
+        if (cancelled) return;
+        applyLeaderboard(leaderboard);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [roomId]);
 
   // WebSocket
   useEffect(() => {
@@ -100,50 +209,109 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         handleWSEvent(event);
       } catch {}
     };
+    socket.onclose = (e) => {
+      if (e.code === 4401) {
+        try { window.dispatchEvent(new CustomEvent('cz_auth_invalid')); } catch {}
+      }
+    };
     return () => socket.close();
   }, [roomId, user?.token]);
 
+  // Restore submission on refresh: one submission per task/round.
+  useEffect(() => {
+    if (!matchId || !roundId || !user?.id) {
+      setSubmitLocked(false);
+      return;
+    }
+    let cancelled = false;
+    submissionsApi.list()
+      .then((all) => {
+        if (cancelled) return;
+        const mine = all
+          .filter(s => s.match === matchId && s.round === roundId && String(s.user?.id) === String(user.id))
+          .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+        if (mine.length) {
+          setSubmission(mine[0]);
+          setSubmitLocked(true);
+        } else {
+          setSubmitLocked(false);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [matchId, roundId, user?.id]);
+
   const handleWSEvent = useCallback((event: WSEvent) => {
-    switch (event.type) {
+    const name = (event.event ?? event.type) as string | undefined;
+    switch (name) {
       case 'leaderboard_updated':
-        setPlayers(event.payload.players);
+        if (Array.isArray(event.payload?.entries)) applyLeaderboard(event.payload.entries);
         break;
       case 'player_eliminated':
-        setPlayers(p => p.map(x => x.id === event.payload.player_id ? { ...x, is_eliminated: true } : x));
+        // leaderboard will be rebroadcast
         break;
       case 'solution_accepted':
-        setPlayers(p => p.map(x => x.id === event.payload.player_id
-          ? { ...x, submit_time: event.payload.time_seconds } : x));
+        // leaderboard will be rebroadcast
         break;
       case 'round_started':
-        setRound(event.payload.round);
+        setRound(event.payload.round_number ?? event.payload.round ?? 1);
         setSubmission(null);
+        setSubmitLocked(false);
+        setTimeUp(false);
         setCode(DEFAULT_CODE);
+        if (typeof event.payload?.round_duration_seconds === 'number') {
+          setRoundDurationSeconds(event.payload.round_duration_seconds);
+        }
+        if (typeof event.payload?.started_at === 'string') {
+          setRoundStartedAtISO(event.payload.started_at);
+        }
+        if (matchId) {
+          matchesApi.get(matchId).then(applyMatchSnapshot).catch(() => {});
+          matchesApi.leaderboard(matchId).then(applyLeaderboard).catch(() => {});
+        }
         break;
       case 'match_finished':
         navigate('results', roomId || undefined);
         break;
+      case 'room_disbanded':
+        localStorage.removeItem('cz_room_id');
+        localStorage.setItem('cz_page', 'dashboard');
+        navigate('dashboard');
+        break;
     }
-  }, [navigate, roomId]);
+  }, [applyLeaderboard, applyMatchSnapshot, matchId, navigate, roomId]);
+
+  useEffect(() => {
+    if (!matchId || !roundId) return;
+    if (time > 0) {
+      setTimeUp(false);
+      return;
+    }
+    setTimeUp(true);
+    setActiveTab('results');
+    const key = `${matchId}:${roundId}`;
+    if (timeUpTickedRef.current === key) return;
+    timeUpTickedRef.current = key;
+    matchesApi.tick(matchId)
+      .then((m) => applyMatchSnapshot(m))
+      .catch(() => {});
+  }, [time, matchId, roundId, applyMatchSnapshot]);
 
   const handleSubmit = async () => {
-    if (submitting || !code.trim()) return;
+    if (timeUp || submitLocked || submission || submitting || !code.trim() || !matchId) return;
     setSubmitting(true);
     setActiveTab('results');
     try {
-      const result = await submissionsApi.submit(roomId!, code, 'python3');
+      const result = await submissionsApi.submit(matchId, roundId, code);
       setSubmission(result);
-    } catch {
-      // mock
-      setSubmission({
-        id: 'sub1', player_id: user?.id || '', room_id: roomId || '',
-        round_number: round, code, language: 'python3',
-        status: Math.random() > 0.3 ? 'accepted' : 'wrong_answer',
-        execution_time: 234, memory_used: 14,
-        test_results: MOCK_TASK.visible_tests.map(t => ({ passed: Math.random() > 0.3, input: t.input, expected: t.output })),
-        submitted_at: new Date().toISOString(),
-      });
+      setSubmitLocked(true);
     } finally { setSubmitting(false); }
+  };
+
+  const handleEditorScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+    const next = e.currentTarget.scrollTop;
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => setEditorScrollTop(next));
   };
 
   // Handle tab in textarea
@@ -174,16 +342,16 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
     return map[s] || { label: s.toUpperCase(), cls: 'status-pending' };
   };
 
+  const getLeaderboardUsername = (entry: LeaderboardEntry) => entry.user?.username ?? entry.username ?? 'UNKNOWN';
+
   const sortedPlayers = [...players].sort((a, b) => {
-    if (a.is_eliminated && !b.is_eliminated) return 1;
-    if (!a.is_eliminated && b.is_eliminated) return -1;
-    const at = (a as any).submit_time;
-    const bt = (b as any).submit_time;
-    if (at && bt) return at - bt;
-    if (at) return -1;
-    if (bt) return 1;
-    return 0;
+    if (a.eliminated && !b.eliminated) return 1;
+    if (!a.eliminated && b.eliminated) return -1;
+    if (a.points !== b.points) return (b.points ?? 0) - (a.points ?? 0);
+    return (a.total_solution_time ?? 0) - (b.total_solution_time ?? 0);
   });
+  const survivingPlayers = sortedPlayers.filter((player) => !player.eliminated).length;
+  const eliminatedPlayers = sortedPlayers.length - survivingPlayers;
 
   return (
     <div className="page" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -202,10 +370,12 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
 
         {/* Task name */}
-        <span style={{ fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 700, letterSpacing: 2 }}>{task.title}</span>
-        <span className={`tag ${task.difficulty === 'easy' ? 'tag-success' : task.difficulty === 'medium' ? 'tag-warn' : 'tag-danger'}`} style={{ fontSize: 9 }}>
-          {task.difficulty.toUpperCase()}
-        </span>
+        <span style={{ fontFamily: 'var(--font-display)', fontSize: 13, fontWeight: 700, letterSpacing: 2 }}>{task?.title || 'LOADING...'}</span>
+        {task?.difficulty && (
+          <span className={`tag ${task.difficulty === 'easy' ? 'tag-success' : task.difficulty === 'medium' ? 'tag-warn' : 'tag-danger'}`} style={{ fontSize: 9 }}>
+            {task.difficulty.toUpperCase()}
+          </span>
+        )}
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />
@@ -223,6 +393,9 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         <span style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)' }}>
           {user?.username}
         </span>
+        <button className="btn btn-ghost btn-sm" onClick={leaveMatch} style={{ marginLeft: 12 }}>
+          LEAVE MATCH
+        </button>
       </div>
 
       {/* MAIN CONTENT */}
@@ -290,10 +463,20 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
                   </div>
                 ))}
 
-                <div style={{ marginTop: 12, display: 'flex', gap: 16 }}>
-                  <span style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)' }}>⏱ {task.time_limit}s</span>
-                  <span style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)' }}>💾 {task.memory_limit}MB</span>
-                </div>
+                {(task.time_limit > 0 || task.memory_limit > 0) && (
+                  <div style={{ marginTop: 12, display: 'flex', gap: 16 }}>
+                    {task.time_limit > 0 && (
+                      <span style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                        ⏱ {task.time_limit}s
+                      </span>
+                    )}
+                    {task.memory_limit > 0 && (
+                      <span style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)' }}>
+                        💾 {task.memory_limit}MB
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -317,19 +500,24 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
                         {statusLabel(submission.status).label}
                       </span>
                     </div>
-                    {submission.execution_time && (
+                    {submission.status === 'pending' && (
+                      <div style={{ marginBottom: 16, color: 'var(--text-secondary)', fontFamily: 'var(--font-code)', fontSize: 12 }}>
+                        Waiting for the host to review this submission.
+                      </div>
+                    )}
+                    {typeof submission.execution_time === 'number' && (
                       <div style={{ display: 'flex', gap: 20, marginBottom: 16 }}>
                         <div>
                           <div className="label">EXEC TIME</div>
-                          <div style={{ fontFamily: 'var(--font-code)', color: 'var(--accent)' }}>{submission.execution_time}ms</div>
+                          <div style={{ fontFamily: 'var(--font-code)', color: 'var(--accent)' }}>{formatMs(submission.execution_time)}</div>
                         </div>
                         <div>
                           <div className="label">MEMORY</div>
-                          <div style={{ fontFamily: 'var(--font-code)', color: 'var(--accent)' }}>{submission.memory_used}MB</div>
+                          <div style={{ fontFamily: 'var(--font-code)', color: 'var(--accent)' }}>—</div>
                         </div>
                       </div>
                     )}
-                    {submission.test_results && (
+                    {submission.test_results && submission.test_results.length > 0 && (
                       <div>
                         <div className="label" style={{ marginBottom: 10 }}>TEST CASES</div>
                         {submission.test_results.map((t, i) => (
@@ -346,12 +534,24 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
                             </div>
                             {!t.passed && (
                               <div style={{ fontFamily: 'var(--font-code)', fontSize: 11, color: 'var(--text-secondary)', marginTop: 6 }}>
-                                <div>Expected: <span style={{ color: 'var(--success)' }}>{t.expected}</span></div>
-                                {t.got && <div>Got: <span style={{ color: 'var(--danger)' }}>{t.got}</span></div>}
+                                {typeof (t as any).expected_output === 'string' && (
+                                  <div>Expected: <span style={{ color: 'var(--success)' }}>{(t as any).expected_output}</span></div>
+                                )}
+                                {(t as any).stdout && (
+                                  <div>Stdout: <span style={{ color: 'var(--text-primary)' }}>{(t as any).stdout}</span></div>
+                                )}
+                                {(t as any).stderr && (
+                                  <div>Stderr: <span style={{ color: 'var(--danger)' }}>{(t as any).stderr}</span></div>
+                                )}
                               </div>
                             )}
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {submission.status !== 'pending' && (!submission.test_results || submission.test_results.length === 0) && (
+                      <div style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-code)', fontSize: 12 }}>
+                        No automated test results are stored for this submission.
                       </div>
                     )}
                   </div>
@@ -381,6 +581,8 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
               value={code}
               onChange={e => setCode(e.target.value)}
               onKeyDown={handleKeyDown}
+              onScroll={handleEditorScroll}
+              readOnly={timeUp}
               spellCheck={false}
               title="Code editor"
               aria-label="Code editor"
@@ -400,14 +602,16 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
               background: 'var(--bg-secondary)', borderRight: '1px solid var(--border)',
               padding: '16px 0', pointerEvents: 'none', overflow: 'hidden',
             }}>
-              {code.split('\n').map((_, i) => (
-                <div key={i} style={{
-                  fontFamily: 'var(--font-code)', fontSize: 14, lineHeight: 1.7,
-                  color: 'var(--text-secondary)', textAlign: 'right', paddingRight: 10,
-                }}>
-                  {i + 1}
-                </div>
-              ))}
+              <div style={{ transform: `translateY(-${editorScrollTop}px)` }}>
+                {code.split('\n').map((_, i) => (
+                  <div key={i} style={{
+                    fontFamily: 'var(--font-code)', fontSize: 14, lineHeight: 1.7,
+                    color: 'var(--text-secondary)', textAlign: 'right', paddingRight: 10,
+                  }}>
+                    {i + 1}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -426,9 +630,13 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
             <button
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={submitting || submission?.status === 'accepted'}
+              disabled={submitting || timeUp || submitLocked || Boolean(submission)}
             >
-              {submitting ? 'JUDGING...' : submission?.status === 'accepted' ? 'SUBMITTED ✓' : '⚡ SUBMIT'}
+              {submitting ? 'JUDGING...' : timeUp ? 'TIME UP' : (submitLocked || submission) ? 'SUBMITTED ✓' : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <Zap size={16} /> SUBMIT
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -445,16 +653,34 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
             <span className="dot dot-green pulse" />
           </div>
 
+          <div style={{ padding: 12, borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              {[
+                ['ENTERED', String(sortedPlayers.length)],
+                ['SURVIVES', String(survivingPlayers)],
+                ['ELIMINATED', String(eliminatedPlayers)],
+                ['ROUND', `${round}/${totalRounds}`],
+              ].map(([label, value]) => (
+                <div key={label} className="card" style={{ padding: '10px 12px', margin: 0 }}>
+                  <div className="label" style={{ fontSize: 9, marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 900, color: 'var(--accent)' }}>
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
             {sortedPlayers.map((p, i) => (
-              <div key={p.id} style={{
+              <div key={p.user_id} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
                 marginBottom: 4, border: '1px solid var(--border)', borderRadius: 2,
-                background: p.is_eliminated ? 'var(--eliminated)'
-                  : p.username === user?.username ? 'var(--accent-glow)'
+                background: p.eliminated ? 'var(--eliminated)'
+                  : getLeaderboardUsername(p) === user?.username ? 'var(--accent-glow)'
                   : 'var(--bg-card)',
-                opacity: p.is_eliminated ? 0.5 : 1,
-                borderColor: p.username === user?.username && !p.is_eliminated ? 'var(--accent)' : 'var(--border)',
+                opacity: p.eliminated ? 0.5 : 1,
+                borderColor: getLeaderboardUsername(p) === user?.username && !p.eliminated ? 'var(--accent)' : 'var(--border)',
                 transition: 'all 0.3s',
               }}>
                 <div style={{
@@ -462,23 +688,20 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
                   color: i === 0 ? 'var(--accent)' : 'var(--text-secondary)',
                   textAlign: 'center', flexShrink: 0,
                 }}>
-                  {p.is_eliminated ? '✗' : i + 1}
+                  {p.eliminated ? '✗' : i + 1}
                 </div>
-                <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{p.username[0]}</div>
+                <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{getLeaderboardUsername(p)[0] || '?'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontFamily: 'var(--font-display)', fontSize: 11, fontWeight: 700,
-                    letterSpacing: 1, color: p.is_eliminated ? 'var(--text-secondary)' : 'var(--text-primary)',
+                    letterSpacing: 1, color: p.eliminated ? 'var(--text-secondary)' : 'var(--text-primary)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    textDecoration: p.is_eliminated ? 'line-through' : 'none',
+                    textDecoration: p.eliminated ? 'line-through' : 'none',
                   }}>
-                    {p.username}
+                    {getLeaderboardUsername(p)}
                   </div>
                   <div style={{ fontFamily: 'var(--font-code)', fontSize: 10, color: 'var(--text-secondary)', marginTop: 1 }}>
-                    {(p as any).submit_time
-                      ? `${formatTime((p as any).submit_time)} ✓`
-                      : p.is_eliminated ? 'ELIMINATED'
-                      : 'solving...'}
+                    {p.eliminated ? 'ELIMINATED' : `${p.points} pts • ${p.solved_count} solved`}
                   </div>
                 </div>
               </div>
@@ -494,7 +717,7 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
             <div className="timer-label">TIME REMAINING</div>
             <div className="progress-bar" style={{ marginTop: 12 }}>
               <div className="progress-fill" style={{
-                width: `${(time / 300) * 100}%`,
+                width: `${(time / Math.max(1, roundDurationSeconds)) * 100}%`,
                 background: time < 30 ? 'var(--danger)' : time < 60 ? 'var(--warn)' : 'var(--accent)',
                 transition: 'width 1s linear, background 0.3s',
               }} />

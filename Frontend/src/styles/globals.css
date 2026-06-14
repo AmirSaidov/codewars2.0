@@ -39,9 +39,9 @@
   --accent-dim: #0099aa;
   --accent-glow: rgba(0, 245, 255, 0.2);
   --text-primary: #e0d0ff;
-  --text-secondary: #6040a0;
+  --text-secondary: #b39cff;
   --text-accent: #ff00cc;
-  --border: #2a1550;
+  --border: #3a1f6b;
   --border-accent: #9b00ff;
   --danger: #ff0055;
   --success: #00ff88;
@@ -123,6 +123,10 @@ html, body, #root {
   min-height: 100vh;
   background: var(--bg-primary);
   position: relative;
+}
+
+h1, h2, h3 {
+  color: var(--text-primary);
 }
 
 /* scanlines overlay */
@@ -224,11 +228,50 @@ html, body, #root {
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
+.input[type="checkbox"] { width: auto; padding: 0; }
+select.input, textarea.input { color: var(--text-primary); }
+select.input { cursor: pointer; }
+select.input option { background: var(--bg-secondary); color: var(--text-primary); }
 .input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 .input::placeholder { color: var(--text-secondary); }
+
+/* Password peek (hold-to-scan) */
+.password-field { position: relative; }
+.password-input { padding-right: 50px; }
+.password-peek {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: radial-gradient(circle at 30% 30%, var(--bg-card) 0%, var(--bg-secondary) 55%, rgba(0, 0, 0, 0) 100%);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: transform 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+.password-peek:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.password-peek:active { transform: translateY(-50%) scale(0.96); }
+.password-peek-icon { display: inline-flex; align-items: center; justify-content: center; }
+.password-peek::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
 
 /* Labels */
 .label {

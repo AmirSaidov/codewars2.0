@@ -7,7 +7,6 @@ from .models import CodingTask
 
 class CodingTaskSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
-    hidden_tests = serializers.JSONField(write_only=True, required=False)
     hidden_tests_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -34,17 +33,3 @@ class CodingTaskSerializer(serializers.ModelSerializer):
     def get_hidden_tests_count(self, obj):
         return len(obj.hidden_tests or [])
 
-    def validate_examples(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError('Examples must be a list.')
-        return value
-
-    def validate_visible_tests(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError('Visible tests must be a list.')
-        return value
-
-    def validate_hidden_tests(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError('Hidden tests must be a list.')
-        return value

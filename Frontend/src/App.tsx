@@ -27,9 +27,17 @@ const App: React.FC = () => {
   const [wsMessages, setWsMessages] = useState<any[]>([]);
   const [ws, setWs] = useState<WebSocket | null>(null);
 
-  const navigate = (p: Page, rid?: string) => {
-    if (rid) setRoomId(rid);
+  const navigate = (p: Page, rid?: string | number) => {
+    if (rid !== undefined && rid !== null) {
+      const normalizedRoomId = String(rid);
+      setRoomId(normalizedRoomId);
+      localStorage.setItem('cz_room_id', normalizedRoomId);
+    }
     setPage(p);
+    localStorage.setItem('cz_page', p);
+    if (import.meta.env.DEV) {
+      console.log('[nav]', { page: p, roomId: rid });
+    }
   };
 
   const login = (u: User) => {
@@ -42,14 +50,52 @@ const App: React.FC = () => {
     setUser(null);
     localStorage.removeItem('cz_user');
     localStorage.removeItem('cz_token');
+    localStorage.removeItem('cz_refresh');
     navigate('landing');
   };
 
   useEffect(() => {
+    const handler = () => logout();
+    window.addEventListener('cz_auth_invalid', handler as any);
+    return () => window.removeEventListener('cz_auth_invalid', handler as any);
+  }, []);
+
+  useEffect(() => {
     const stored = localStorage.getItem('cz_user');
-    if (stored) setUser(JSON.parse(stored));
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as User;
+        setUser(parsed);
+        if (!localStorage.getItem('cz_token') && parsed?.token) {
+          localStorage.setItem('cz_token', parsed.token);
+        }
+      } catch {
+        localStorage.removeItem('cz_user');
+      }
+    }
     const storedTheme = localStorage.getItem('cz_theme') as Theme;
     if (storedTheme) setTheme(storedTheme);
+
+    const storedRoomId = localStorage.getItem('cz_room_id');
+    const normalizedStoredRoomId = storedRoomId && String(storedRoomId).match(/^\d+$/) ? storedRoomId : null;
+    if (normalizedStoredRoomId) setRoomId(normalizedStoredRoomId);
+    else if (storedRoomId) localStorage.removeItem('cz_room_id');
+
+    const storedPage = localStorage.getItem('cz_page') as Page | null;
+    if (storedPage) {
+      const needsAuth: Page[] = ['dashboard', 'lobby', 'arena', 'admin', 'results'];
+      const needsRoom: Page[] = ['lobby', 'arena', 'admin', 'results'];
+
+      if (needsAuth.includes(storedPage) && !stored) {
+        setPage('landing');
+      } else if (needsRoom.includes(storedPage) && !normalizedStoredRoomId) {
+        setPage('dashboard');
+      } else {
+        setPage(storedPage);
+      }
+    } else if (stored) {
+      setPage('dashboard');
+    }
   }, []);
 
   const changeTheme = (t: Theme) => {
@@ -66,7 +112,7 @@ const App: React.FC = () => {
       case 'lobby': return <RoomLobbyPage navigate={navigate} user={user} roomId={roomId} />;
       case 'arena': return <BattleArenaPage navigate={navigate} user={user} roomId={roomId} />;
       case 'admin': return <AdminPanelPage navigate={navigate} user={user} roomId={roomId} />;
-      case 'results': return <MatchResultsPage navigate={navigate} roomId={roomId} />;
+      case 'results': return <MatchResultsPage navigate={navigate} user={user} roomId={roomId} />;
       case 'theme-settings': return <ThemeSettingsPage navigate={navigate} />;
       default: return <LandingPage navigate={navigate} />;
     }

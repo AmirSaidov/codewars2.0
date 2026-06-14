@@ -4,65 +4,161 @@ import type { Page } from '../App';
 import type { User } from '../context/contexts';
 import { roomsApi } from '../api';
 import type { Room, CreateRoomPayload } from '../api';
+import { Lock, Palette } from 'lucide-react';
 
 interface Props {
-  navigate: (p: Page, roomId?: string) => void;
+  navigate: (p: Page, roomId?: string | number) => void;
   user: User | null;
   onLogout: () => void;
 }
 
-const MOCK_ROOMS: Room[] = [
-  { id: 'r1', name: 'STALKER BOOTCAMP', host_id: 'u1', max_players: 8, current_players: 5, is_private: false, rounds: 3, difficulty: 'medium', status: 'waiting', created_at: new Date().toISOString() },
-  { id: 'r2', name: 'PYTHON ELITE', host_id: 'u2', max_players: 6, current_players: 6, is_private: false, rounds: 5, difficulty: 'hard', status: 'in_progress', created_at: new Date().toISOString() },
-  { id: 'r3', name: 'NEWBIE ARENA', host_id: 'u3', max_players: 10, current_players: 2, is_private: false, rounds: 2, difficulty: 'easy', status: 'waiting', created_at: new Date().toISOString() },
-  { id: 'r4', name: 'NIGHT RAID', host_id: 'u4', max_players: 4, current_players: 1, is_private: true, rounds: 4, difficulty: 'hard', status: 'waiting', created_at: new Date().toISOString() },
-];
-
 const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
-  const [rooms, setRooms] = useState<Room[]>(MOCK_ROOMS);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'easy' | 'medium' | 'hard'>('all');
+  const [showJoinCode, setShowJoinCode] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [joinCodePassword, setJoinCodePassword] = useState('');
+  const [joinCodeError, setJoinCodeError] = useState('');
+  const [joinTarget, setJoinTarget] = useState<Room | null>(null);
+  const [joinPassword, setJoinPassword] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [createError, setCreateError] = useState('');
+  const [globalError, setGlobalError] = useState('');
+  const [checkingActive, setCheckingActive] = useState(true);
 
   const [createForm, setCreateForm] = useState<CreateRoomPayload>({
-    name: '', max_players: 8, is_private: false, password: '',
-    rounds: 3, difficulty: 'medium',
+    name: '', max_players: 8, round_count: 3, is_private: false, password: '',
   });
 
   const fetchRooms = async () => {
     setLoading(true);
+    setGlobalError('');
     try {
       const res = await roomsApi.list();
       setRooms(res.results);
     } catch {
-      // use mock in dev
+      setRooms([]);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchRooms(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setCheckingActive(true);
+      try {
+        const active = await roomsApi.myActive();
+        if (cancelled) return;
+        if (active?.id) {
+          localStorage.setItem('cz_room_id', String(active.id));
+          localStorage.setItem('cz_page', 'lobby');
+          navigate('lobby', active.id);
+          return;
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setCheckingActive(false);
+      }
+      if (!cancelled) fetchRooms();
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!user?.token) onLogout();
+  }, [user?.token, onLogout]);
 
   const handleCreate = async () => {
     if (!createForm.name.trim()) return;
+    setCreateError('');
+    setGlobalError('');
     try {
       const room = await roomsApi.create(createForm);
+      localStorage.setItem('cz_room_id', String(room.id));
+      localStorage.setItem('cz_page', 'lobby');
       navigate('lobby', room.id);
-    } catch {
-      // mock nav
-      navigate('lobby', 'new-room-' + Date.now());
+      setShowCreate(false);
+    } catch (e: any) {
+      setCreateError(e?.message || 'Failed to create room. Check fields and try again.');
     }
-    setShowCreate(false);
   };
 
   const handleJoin = async (room: Room) => {
     try {
-      await roomsApi.join(room.id);
-    } catch {}
-    navigate('lobby', room.id);
+      setGlobalError('');
+      if (room.is_private) {
+        setJoinTarget(room);
+        setJoinPassword('');
+        setJoinError('');
+        return;
+      }
+      if (import.meta.env.DEV) console.log('[join] public start', room.id);
+      await roomsApi.join(String(room.id));
+      if (import.meta.env.DEV) console.log('[join] public ok', room.id);
+      navigate('lobby', room.id);
+    } catch (e: any) {
+      const message = e?.message || 'Failed to join room';
+      setGlobalError(message);
+      if (import.meta.env.DEV) console.log('[join] public err', room.id, e);
+
+      // If backend says password is invalid/required, offer the password modal even if `is_private`
+      // was missing/wrong in the list response.
+      if (typeof message === 'string' && message.toLowerCase().includes('password')) {
+        setJoinTarget(room);
+        setJoinPassword('');
+        setJoinError(message);
+      }
+    }
   };
 
-  const filtered = rooms.filter(r => filter === 'all' || r.difficulty === filter);
+  const submitJoinPrivate = async () => {
+    if (!joinTarget) return;
+    setJoinError('');
+    if (!joinPassword.trim()) {
+      setJoinError('Password is required');
+      return;
+    }
+    try {
+      const targetId = joinTarget.id;
+      if (import.meta.env.DEV) console.log('[join] private start', targetId);
+      await roomsApi.join(String(targetId), joinPassword.trim());
+      if (import.meta.env.DEV) console.log('[join] private ok', targetId);
+      // ensure lobby has roomId immediately even if state batching happens
+      localStorage.setItem('cz_room_id', String(targetId));
+      localStorage.setItem('cz_page', 'lobby');
+      navigate('lobby', targetId);
+      setJoinTarget(null);
+      setJoinPassword('');
+    } catch (e: any) {
+      setJoinError(e?.message || 'Failed to join room');
+      if (import.meta.env.DEV) console.log('[join] private err', joinTarget?.id, e);
+    }
+  };
 
-  const diffColor = (d: string) => d === 'easy' ? 'var(--success)' : d === 'medium' ? 'var(--warn)' : 'var(--danger)';
+  const submitJoinByCode = async () => {
+    const code = joinCode.trim();
+    if (!code.match(/^\d+$/)) {
+      setJoinCodeError('Enter a valid invite code');
+      return;
+    }
+    setJoinCodeError('');
+    setGlobalError('');
+    try {
+      await roomsApi.join(code, joinCodePassword.trim() || undefined);
+      localStorage.setItem('cz_room_id', String(code));
+      localStorage.setItem('cz_page', 'lobby');
+      navigate('lobby', code);
+      setShowJoinCode(false);
+      setJoinCode('');
+      setJoinCodePassword('');
+    } catch (e: any) {
+      setJoinCodeError(e?.message || 'Failed to join room');
+    }
+  };
+
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const filtered = safeRooms;
 
   return (
     <div className="page">
@@ -85,7 +181,11 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
                 {user?.username || 'OPERATIVE'}
               </span>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('theme-settings')}>🎨 THEMES</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate('theme-settings')}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Palette size={14} /> THEMES
+              </span>
+            </button>
             <button className="btn btn-ghost btn-sm" onClick={onLogout}>LOGOUT</button>
           </div>
         </div>
@@ -102,28 +202,29 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
             <button className="btn btn-ghost btn-sm" onClick={fetchRooms}>↻ REFRESH</button>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setJoinCode('');
+                setJoinCodePassword('');
+                setJoinCodeError('');
+                setShowJoinCode(true);
+              }}
+            >
+              JOIN BY CODE
+            </button>
             <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ CREATE ROOM</button>
           </div>
         </div>
 
-        {/* Filters */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-          {(['all', 'easy', 'medium', 'hard'] as const).map(f => (
-            <button
-              key={f}
-              className={`btn btn-sm ${filter === f ? 'btn-outline' : 'btn-ghost'}`}
-              onClick={() => setFilter(f)}
-            >
-              {f.toUpperCase()}
-            </button>
-          ))}
+        <div style={{ display: 'flex', marginBottom: 24 }}>
           <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontFamily: 'var(--font-display)', fontSize: 11, alignSelf: 'center', letterSpacing: 2 }}>
             {filtered.length} ROOMS
           </span>
         </div>
 
         {/* Room list */}
-        {loading ? (
+        {(checkingActive || loading) ? (
           <div style={{ textAlign: 'center', padding: 80, color: 'var(--text-secondary)', fontFamily: 'var(--font-display)', letterSpacing: 3 }}>
             SCANNING ZONE...
           </div>
@@ -133,41 +234,40 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
               <div key={room.id} className="card fade-in" style={{
                 animationDelay: `${i * 0.05}s`,
                 display: 'grid',
-                gridTemplateColumns: '1fr auto auto auto auto',
+                gridTemplateColumns: '1fr auto auto auto',
                 alignItems: 'center',
                 gap: 24,
-                opacity: room.status === 'in_progress' ? 0.7 : 1,
+                opacity: room.status === 'running' ? 0.7 : 1,
               }}>
                 {/* Name + info */}
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                    {room.is_private && <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>🔒</span>}
+                    {room.is_private && (
+                      <span style={{ color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                        <Lock size={14} />
+                      </span>
+                    )}
                     <span style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700, letterSpacing: 2 }}>
                       {room.name}
                     </span>
-                    {room.status === 'in_progress' && (
+                    {room.status === 'running' && (
                       <span className="tag tag-danger" style={{ fontSize: 9 }}>● LIVE</span>
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 16 }}>
                     <span style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)' }}>
-                      {room.rounds} rounds
+                      host: {room.creator?.username || 'admin'}
                     </span>
                     <span style={{ fontFamily: 'var(--font-code)', fontSize: 12, color: 'var(--text-secondary)' }}>
-                      Python 3.10
+                      status: {room.status}
                     </span>
                   </div>
-                </div>
-
-                {/* Difficulty */}
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 11, letterSpacing: 2, color: diffColor(room.difficulty), textTransform: 'uppercase' }}>
-                  {room.difficulty}
                 </div>
 
                 {/* Players */}
                 <div style={{ textAlign: 'center', minWidth: 60 }}>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {room.current_players}/{room.max_players}
+                    {room.player_count}/{room.max_players}
                   </div>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: 9, letterSpacing: 2, color: 'var(--text-secondary)' }}>PLAYERS</div>
                 </div>
@@ -175,18 +275,18 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
                 {/* Progress bar */}
                 <div style={{ width: 80 }}>
                   <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${(room.current_players / room.max_players) * 100}%` }} />
+                    <div className="progress-fill" style={{ width: `${(room.player_count / room.max_players) * 100}%` }} />
                   </div>
                 </div>
 
                 {/* Action */}
-                {room.status === 'waiting' && room.current_players < room.max_players ? (
+                {room.status === 'waiting' && room.player_count < room.max_players ? (
                   <button className="btn btn-outline btn-sm" onClick={() => handleJoin(room)}>
                     JOIN
                   </button>
                 ) : (
                   <button className="btn btn-ghost btn-sm" disabled>
-                    {room.status === 'in_progress' ? 'IN BATTLE' : 'FULL'}
+                    {room.status === 'running' ? 'IN BATTLE' : 'FULL'}
                   </button>
                 )}
               </div>
@@ -196,6 +296,15 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
                 NO ACTIVE ZONES — CREATE ONE
               </div>
             )}
+          </div>
+        )}
+
+        {globalError && (
+          <div className="card" style={{ marginTop: 16, borderColor: 'var(--danger)', color: 'var(--text-primary)' }}>
+            <div style={{ fontFamily: 'var(--font-display)', letterSpacing: 2, fontSize: 11, color: 'var(--danger)' }}>ERROR</div>
+            <div style={{ marginTop: 8, color: 'var(--text-secondary)', fontFamily: 'var(--font-code)', fontSize: 12 }}>
+              {globalError}
+            </div>
           </div>
         )}
       </div>
@@ -212,34 +321,22 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
                 onChange={e => setCreateForm(p => ({ ...p, name: e.target.value }))} />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
               <div className="form-group">
-                <label className="label">Max Players</label>
-                <select className="input" value={createForm.max_players}
+                <label className="label" htmlFor="maxPlayers">Max Players</label>
+                <select id="maxPlayers" className="input" value={createForm.max_players}
                   onChange={e => setCreateForm(p => ({ ...p, max_players: +e.target.value }))}
                   style={{ background: 'var(--bg-secondary)', cursor: 'pointer' }}>
                   {[2, 4, 6, 8, 10].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
               <div className="form-group">
-                <label className="label">Rounds</label>
-                <select className="input" value={createForm.rounds}
-                  onChange={e => setCreateForm(p => ({ ...p, rounds: +e.target.value }))}
+                <label className="label" htmlFor="roundCount">Rounds</label>
+                <select id="roundCount" className="input" value={createForm.round_count}
+                  onChange={e => setCreateForm(p => ({ ...p, round_count: +e.target.value }))}
                   style={{ background: 'var(--bg-secondary)', cursor: 'pointer' }}>
-                  {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="label">Difficulty</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['easy', 'medium', 'hard'] as const).map(d => (
-                  <button key={d} className={`btn btn-sm ${createForm.difficulty === d ? 'btn-primary' : 'btn-ghost'}`}
-                    onClick={() => setCreateForm(p => ({ ...p, difficulty: d }))}>
-                    {d.toUpperCase()}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -259,9 +356,82 @@ const DashboardPage: React.FC<Props> = ({ navigate, user, onLogout }) => {
               </div>
             )}
 
+            {createError && <div className="form-error" style={{ marginBottom: 16 }}>{createError}</div>}
+
             <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
               <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowCreate(false)}>CANCEL</button>
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCreate}>DEPLOY</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JOIN BY CODE MODAL */}
+      {showJoinCode && (
+        <div className="modal-overlay" onClick={() => setShowJoinCode(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, letterSpacing: 4, marginBottom: 24 }}>
+              ENTER INVITE CODE
+            </h2>
+
+            <div className="form-group">
+              <label className="label">Invite Code</label>
+              <input
+                className="input"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submitJoinByCode()}
+                placeholder="e.g. 10"
+                inputMode="numeric"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="label">Password (optional)</label>
+              <input
+                className="input"
+                type="password"
+                value={joinCodePassword}
+                onChange={(e) => setJoinCodePassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submitJoinByCode()}
+                placeholder="if room is private"
+              />
+            </div>
+
+            {joinCodeError && <div className="form-error" style={{ marginBottom: 16 }}>{joinCodeError}</div>}
+            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowJoinCode(false)}>CANCEL</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={submitJoinByCode}>JOIN</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JOIN PRIVATE ROOM MODAL */}
+      {joinTarget && (
+        <div className="modal-overlay" onClick={() => setJoinTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 18, letterSpacing: 4, marginBottom: 24 }}>
+              ENTER ACCESS CODE
+            </h2>
+            <div style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-code)', fontSize: 12, marginBottom: 12 }}>
+              {joinTarget.name}
+            </div>
+            <div className="form-group">
+              <label className="label">Password</label>
+              <input
+                className="input"
+                type="password"
+                value={joinPassword}
+                onChange={e => setJoinPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submitJoinPrivate()}
+                placeholder="room password"
+              />
+            </div>
+            {joinError && <div className="form-error" style={{ marginBottom: 16 }}>{joinError}</div>}
+            <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+              <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setJoinTarget(null)}>CANCEL</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={submitJoinPrivate}>JOIN</button>
             </div>
           </div>
         </div>

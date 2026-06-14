@@ -75,6 +75,7 @@ class StartMatchSerializer(serializers.Serializer):
         required=False,
         allow_empty=False,
     )
+    round_count = serializers.IntegerField(required=False, min_value=1, max_value=10)
 
 
 class PlayerActionSerializer(serializers.Serializer):

@@ -4,11 +4,12 @@ from django.db import models
 
 class Submission(models.Model):
     class Status(models.TextChoices):
-        ACCEPTED = 'Accepted', 'Accepted'
-        WRONG_ANSWER = 'Wrong Answer', 'Wrong Answer'
-        RUNTIME_ERROR = 'Runtime Error', 'Runtime Error'
-        TIME_LIMIT_EXCEEDED = 'Time Limit Exceeded', 'Time Limit Exceeded'
-        COMPILATION_ERROR = 'Compilation Error', 'Compilation Error'
+        PENDING = 'pending', 'Pending'
+        ACCEPTED = 'accepted', 'Accepted'
+        WRONG_ANSWER = 'wrong_answer', 'Wrong Answer'
+        RUNTIME_ERROR = 'runtime_error', 'Runtime Error'
+        TIME_LIMIT_EXCEEDED = 'time_limit_exceeded', 'Time Limit Exceeded'
+        COMPILATION_ERROR = 'compilation_error', 'Compilation Error'
 
     class ManualDecision(models.TextChoices):
         NONE = '', 'None'
@@ -36,7 +37,7 @@ class Submission(models.Model):
         on_delete=models.PROTECT,
     )
     code = models.TextField()
-    status = models.CharField(max_length=32, choices=Status.choices)
+    status = models.CharField(max_length=32, choices=Status.choices, default=Status.PENDING)
     execution_time = models.FloatField(default=0)
     test_results = models.JSONField(default=list, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
@@ -61,6 +62,9 @@ class Submission(models.Model):
             models.Index(fields=['match', 'round', 'user']),
             models.Index(fields=['status']),
             models.Index(fields=['submitted_at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['match', 'round', 'user'], name='uniq_submission_per_user_per_round'),
         ]
 
     def __str__(self):

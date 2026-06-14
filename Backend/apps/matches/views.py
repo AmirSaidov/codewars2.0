@@ -10,7 +10,7 @@ from apps.leaderboard.services import get_match_leaderboard
 
 from .models import Match
 from .serializers import MatchSerializer, PlayerActionSerializer, RoundSerializer
-from .services import advance_round, eliminate_player, pass_player_to_next_round
+from .services import advance_round, eliminate_player, maybe_auto_advance_round, pass_player_to_next_round
 
 
 User = get_user_model()
@@ -37,6 +37,11 @@ class MatchViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'], url_path='next-round')
     def next_round(self, request, pk=None):
         match = advance_round(request.user, self.get_object())
+        return Response(MatchSerializer(match, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=['post'], url_path='tick')
+    def tick(self, request, pk=None):
+        match = maybe_auto_advance_round(request.user, self.get_object())
         return Response(MatchSerializer(match, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=['post'], url_path='pass-player')
