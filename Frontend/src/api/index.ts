@@ -48,6 +48,96 @@ const getToken = (): string | null => {
   return null;
 };
 
+const getRefreshToken = (): string | null => localStorage.getItem('cz_refresh');
+
+const setAccessToken = (token: string): void => {
+  localStorage.setItem('cz_token', token);
+  try {
+    const storedUser = localStorage.getItem('cz_user');
+    if (!storedUser) return;
+    const parsed = JSON.parse(storedUser) as { token?: string } | null;
+    if (!parsed) return;
+    localStorage.setItem('cz_user', JSON.stringify({ ...parsed, token }));
+  } catch {
+    // Keep the standalone token even if the legacy user blob is malformed.
+  }
+};
+
+const setRefreshToken = (token: string): void => {
+  localStorage.setItem('cz_refresh', token);
+};
+
+const clearAuthStorage = (): void => {
+  localStorage.removeItem('cz_token');
+  localStorage.removeItem('cz_refresh');
+  localStorage.removeItem('cz_user');
+};
+
+const getJwtPayload = (token: string): { exp?: number } | null => {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return JSON.parse(atob(padded)) as { exp?: number };
+  } catch {
+    return null;
+  }
+};
+
+const isJwtExpired = (token: string, skewSeconds = 30): boolean => {
+  const payload = getJwtPayload(token);
+  if (!payload?.exp) return false;
+  return payload.exp <= Math.floor(Date.now() / 1000) + skewSeconds;
+};
+
+let refreshAccessPromise: Promise<string | null> | null = null;
+
+const refreshAccessToken = async (): Promise<string | null> => {
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+
+  if (!refreshAccessPromise) {
+    refreshAccessPromise = fetch(joinUrl(BASE_URL, '/auth/refresh/'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh }),
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const data = (await response.json()) as { access?: string; refresh?: string };
+        if (!data.access) return null;
+        setAccessToken(data.access);
+        if (data.refresh) setRefreshToken(data.refresh);
+        return data.access;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshAccessPromise = null;
+      });
+  }
+
+  return refreshAccessPromise;
+};
+
+export const getValidAccessToken = async (fallbackToken?: string | null): Promise<string | null> => {
+  const stored = getToken();
+  const fallback = fallbackToken || null;
+  const current = stored && !isJwtExpired(stored, 0)
+    ? stored
+    : fallback && !isJwtExpired(fallback, 0)
+      ? fallback
+      : stored || fallback;
+  if (current && current === fallback && current !== stored) {
+    setAccessToken(current);
+  }
+  if (current && !isJwtExpired(current)) return current;
+
+  const refreshed = await refreshAccessToken();
+  if (refreshed) return refreshed;
+  return current && !isJwtExpired(current, 0) ? current : null;
+};
+
 const headers = (extra: Record<string, string> = {}): HeadersInit => ({
   'Content-Type': 'application/json',
   ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
@@ -69,7 +159,16 @@ const sanitizeErrorDetail = (detail: string): string => {
   return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}…` : trimmed;
 };
 
+const isAuthTokenEndpoint = (path: string) =>
+  path.includes('/auth/login/') || path.includes('/auth/register/') || path.includes('/auth/refresh/');
+
 const req = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+  const canRefreshForRequest = !isAuthTokenEndpoint(path);
+
+  if (canRefreshForRequest) {
+    await getValidAccessToken();
+  }
+
   const doFetch = () =>
     fetch(joinUrl(BASE_URL, path), {
       ...options,
@@ -77,31 +176,16 @@ const req = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
     });
 
   let res = await doFetch();
-  if (res.status === 401) {
-    const refresh = localStorage.getItem('cz_refresh');
-    if (refresh) {
-      try {
-        const refreshed = await fetch(joinUrl(BASE_URL, '/auth/refresh/'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh }),
-        });
-        if (refreshed.ok) {
-          const data = (await refreshed.json()) as { access: string };
-          if (data?.access) localStorage.setItem('cz_token', data.access);
-          res = await doFetch();
-        }
-      } catch {
-        // ignore
-      }
+  if (res.status === 401 && canRefreshForRequest) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      res = await doFetch();
     }
   }
 
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem('cz_token');
-      localStorage.removeItem('cz_refresh');
-      localStorage.removeItem('cz_user');
+      clearAuthStorage();
       try {
         window.dispatchEvent(new CustomEvent('cz_auth_invalid'));
       } catch {
@@ -160,6 +244,7 @@ export interface UserProfile {
 
 export interface Room {
   id: number;
+  invite_code?: string | null;
   name: string;
   creator: UserProfile;
   is_private: boolean;
@@ -198,10 +283,33 @@ export interface RoomMembership {
 }
 
 export interface RoomChatMessage {
-  id: number;
-  user: UserProfile;
+  id?: number;
+  user?: UserProfile;
+  user_id?: number;
+  username?: string;
   message: string;
   created_at: string;
+}
+
+export type RoomTournamentPlayerStatus = 'waiting' | 'active' | 'advanced' | 'eliminated' | 'winner';
+
+export interface RoomTournamentPlayer {
+  user_id: number;
+  username: string;
+  status: RoomTournamentPlayerStatus;
+  round_level: number;
+  is_winner: boolean;
+  is_eliminated: boolean;
+  points?: number;
+  solved_count?: number;
+  total_solution_time?: number;
+}
+
+export interface RoomTournamentState {
+  room_id: number;
+  status: Room['status'] | 'active';
+  current_round: number;
+  players: RoomTournamentPlayer[];
 }
 
 export type RoomDetail = Room;
@@ -326,8 +434,12 @@ export const authApi = {
     return res;
   },
 
-  refresh: (refresh: string) =>
-    req<{ access: string }>('/auth/refresh/', { method: 'POST', body: JSON.stringify({ refresh }) }),
+  refresh: async (refresh: string) => {
+    setRefreshToken(refresh);
+    const access = await refreshAccessToken();
+    if (!access) throw new Error('Unable to refresh session');
+    return { access };
+  },
 
   me: () => req<UserProfile>('/auth/me/'),
 };
@@ -343,6 +455,10 @@ export const roomsApi = {
     req<Room>('/rooms/', { method: 'POST', body: JSON.stringify(data) }),
 
   get: (id: string) => req<RoomDetail>(`/rooms/${id}/`),
+
+  messages: (id: string) => req<RoomChatMessage[]>(`/rooms/${id}/messages/`),
+
+  tournament: (id: string) => req<RoomTournamentState>(`/rooms/${id}/tournament/`),
 
   myActive: () => req<RoomDetail | null>('/rooms/my-active/'),
 
@@ -460,7 +576,8 @@ export const matchesApi = {
 
 // ─── WebSocket Factory ────────────────────────────────────────
 export const createRoomWS = (roomId: string, token: string): WebSocket => {
-  return new WebSocket(`${WS_BASE_URL}/ws/rooms/${encodeURIComponent(roomId)}/?token=${encodeURIComponent(token)}`);
+  const url = `${WS_BASE_URL}/ws/rooms/${encodeURIComponent(roomId)}/?token=${encodeURIComponent(token)}`;
+  return new WebSocket(url);
 };
 
 // ─── WS Event Types ───────────────────────────────────────────
@@ -471,11 +588,13 @@ export type WSEventType =
   | 'match_started'
   | 'round_started'
   | 'leaderboard_updated'
+  | 'player_advanced'
   | 'player_eliminated'
   | 'solution_accepted'
   | 'solution_rejected'
   | 'match_finished'
   | 'room_disbanded'
+  | 'connection_established'
   | 'chat_message'
   | 'error';
 

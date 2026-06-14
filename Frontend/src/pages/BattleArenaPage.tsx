@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { Page } from '../App';
 import type { User } from '../context/contexts';
-import { submissionsApi, roomsApi, matchesApi, matchApi, createRoomWS } from '../api';
+import { submissionsApi, roomsApi, matchesApi, matchApi } from '../api';
 import type { WSEvent, Task, Submission, LeaderboardEntry, Match } from '../api';
 import { Zap } from 'lucide-react';
+import { useRoomWebSocket } from '../hooks/useRoomWebSocket';
 
 interface Props {
   navigate: (p: Page, roomId?: string | number) => void;
@@ -199,24 +200,6 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
     return () => { cancelled = true; };
   }, [roomId]);
 
-  // WebSocket
-  useEffect(() => {
-    if (!roomId || !user?.token) return;
-    const socket = createRoomWS(roomId, user.token);
-    socket.onmessage = (e) => {
-      try {
-        const event: WSEvent = JSON.parse(e.data);
-        handleWSEvent(event);
-      } catch {}
-    };
-    socket.onclose = (e) => {
-      if (e.code === 4401) {
-        try { window.dispatchEvent(new CustomEvent('cz_auth_invalid')); } catch {}
-      }
-    };
-    return () => socket.close();
-  }, [roomId, user?.token]);
-
   // Restore submission on refresh: one submission per task/round.
   useEffect(() => {
     if (!matchId || !roundId || !user?.id) {
@@ -280,6 +263,13 @@ const BattleArenaPage: React.FC<Props> = ({ navigate, user, roomId }) => {
         break;
     }
   }, [applyLeaderboard, applyMatchSnapshot, matchId, navigate, roomId]);
+
+  useRoomWebSocket(
+    roomId,
+    user?.token,
+    { onMessage: handleWSEvent },
+    { enabled: Boolean(roomId && matchId) },
+  );
 
   useEffect(() => {
     if (!matchId || !roundId) return;

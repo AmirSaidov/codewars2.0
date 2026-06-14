@@ -6,6 +6,7 @@ import { LoginPage, RegisterPage } from './pages/AuthPages';
 import DashboardPage from './pages/DashboardPage';
 import RoomLobbyPage from './pages/RoomLobbyPage';
 import BattleArenaPage from './pages/BattleArenaPage';
+import TournamentPage from './pages/TournamentPage';
 import { AdminPanelPage, MatchResultsPage, ThemeSettingsPage } from './pages/OtherPages';
 
 export type Page =
@@ -15,9 +16,60 @@ export type Page =
   | 'dashboard'
   | 'lobby'
   | 'arena'
+  | 'tournament'
   | 'admin'
   | 'results'
   | 'theme-settings';
+
+type RouteState = { page: Page; roomId?: string | null };
+
+const protectedPages: Page[] = ['dashboard', 'lobby', 'arena', 'tournament', 'admin', 'results'];
+const roomPages: Page[] = ['lobby', 'arena', 'tournament', 'admin', 'results'];
+
+const normalizeRoomId = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  return /^\d+$/.test(text) ? text : null;
+};
+
+const parseRoute = (): RouteState | null => {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  const roomMatch = path.match(/^\/rooms\/(\d+)(?:\/(arena|tournament|admin|results))?$/);
+  if (roomMatch) {
+    const pageBySegment: Record<string, Page> = {
+      arena: 'arena',
+      tournament: 'tournament',
+      admin: 'admin',
+      results: 'results',
+    };
+    return {
+      page: pageBySegment[roomMatch[2] || ''] || 'lobby',
+      roomId: roomMatch[1],
+    };
+  }
+
+  const staticRoutes: Record<string, Page> = {
+    '/': 'landing',
+    '/login': 'login',
+    '/register': 'register',
+    '/dashboard': 'dashboard',
+    '/theme-settings': 'theme-settings',
+  };
+  return staticRoutes[path] ? { page: staticRoutes[path] } : null;
+};
+
+const pathForPage = (page: Page, roomId?: string | null) => {
+  const normalizedRoomId = normalizeRoomId(roomId);
+  if (page === 'lobby' && normalizedRoomId) return `/rooms/${normalizedRoomId}`;
+  if (page === 'arena' && normalizedRoomId) return `/rooms/${normalizedRoomId}/arena`;
+  if (page === 'tournament' && normalizedRoomId) return `/rooms/${normalizedRoomId}/tournament`;
+  if (page === 'admin' && normalizedRoomId) return `/rooms/${normalizedRoomId}/admin`;
+  if (page === 'results' && normalizedRoomId) return `/rooms/${normalizedRoomId}/results`;
+  if (page === 'login') return '/login';
+  if (page === 'register') return '/register';
+  if (page === 'dashboard') return '/dashboard';
+  if (page === 'theme-settings') return '/theme-settings';
+  return '/';
+};
 
 const App: React.FC = () => {
   const [theme, setTheme] = useState<Theme>('hacker');
@@ -27,14 +79,23 @@ const App: React.FC = () => {
   const [wsMessages, setWsMessages] = useState<any[]>([]);
   const [ws, setWs] = useState<WebSocket | null>(null);
 
-  const navigate = (p: Page, rid?: string | number) => {
-    if (rid !== undefined && rid !== null) {
-      const normalizedRoomId = String(rid);
+  const applyRouteState = (p: Page, rid?: string | number | null) => {
+    const normalizedRoomId = normalizeRoomId(rid);
+    if (normalizedRoomId) {
       setRoomId(normalizedRoomId);
       localStorage.setItem('cz_room_id', normalizedRoomId);
     }
     setPage(p);
     localStorage.setItem('cz_page', p);
+    return normalizedRoomId;
+  };
+
+  const navigate = (p: Page, rid?: string | number) => {
+    const normalizedRoomId = applyRouteState(p, rid ?? (roomPages.includes(p) ? roomId : null));
+    const destination = pathForPage(p, normalizedRoomId ?? (roomPages.includes(p) ? roomId : null));
+    if (window.location.pathname !== destination) {
+      window.history.pushState({ page: p, roomId: normalizedRoomId }, '', destination);
+    }
     if (import.meta.env.DEV) {
       console.log('[nav]', { page: p, roomId: rid });
     }
@@ -43,19 +104,27 @@ const App: React.FC = () => {
   const login = (u: User) => {
     setUser(u);
     localStorage.setItem('cz_user', JSON.stringify(u));
+    if (u.token) localStorage.setItem('cz_token', u.token);
     navigate('dashboard');
   };
 
-  const logout = () => {
+  const clearSession = () => {
     setUser(null);
     localStorage.removeItem('cz_user');
     localStorage.removeItem('cz_token');
     localStorage.removeItem('cz_refresh');
+  };
+
+  const logout = () => {
+    clearSession();
     navigate('landing');
   };
 
   useEffect(() => {
-    const handler = () => logout();
+    const handler = () => {
+      clearSession();
+      navigate('login');
+    };
     window.addEventListener('cz_auth_invalid', handler as any);
     return () => window.removeEventListener('cz_auth_invalid', handler as any);
   }, []);
@@ -81,14 +150,24 @@ const App: React.FC = () => {
     if (normalizedStoredRoomId) setRoomId(normalizedStoredRoomId);
     else if (storedRoomId) localStorage.removeItem('cz_room_id');
 
+    const routeState = parseRoute();
+    if (routeState) {
+      const targetRoomId = normalizeRoomId(routeState.roomId) ?? normalizedStoredRoomId;
+      if (protectedPages.includes(routeState.page) && !stored) {
+        setPage('login');
+      } else if (roomPages.includes(routeState.page) && !targetRoomId) {
+        setPage('dashboard');
+      } else {
+        applyRouteState(routeState.page, targetRoomId);
+      }
+      return;
+    }
+
     const storedPage = localStorage.getItem('cz_page') as Page | null;
     if (storedPage) {
-      const needsAuth: Page[] = ['dashboard', 'lobby', 'arena', 'admin', 'results'];
-      const needsRoom: Page[] = ['lobby', 'arena', 'admin', 'results'];
-
-      if (needsAuth.includes(storedPage) && !stored) {
+      if (protectedPages.includes(storedPage) && !stored) {
         setPage('landing');
-      } else if (needsRoom.includes(storedPage) && !normalizedStoredRoomId) {
+      } else if (roomPages.includes(storedPage) && !normalizedStoredRoomId) {
         setPage('dashboard');
       } else {
         setPage(storedPage);
@@ -97,6 +176,30 @@ const App: React.FC = () => {
       setPage('dashboard');
     }
   }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const routeState = parseRoute();
+      if (!routeState) {
+        setPage(user ? 'dashboard' : 'landing');
+        return;
+      }
+
+      const targetRoomId = normalizeRoomId(routeState.roomId) ?? roomId;
+      if (protectedPages.includes(routeState.page) && !user) {
+        setPage('login');
+        return;
+      }
+      if (roomPages.includes(routeState.page) && !targetRoomId) {
+        setPage('dashboard');
+        return;
+      }
+      applyRouteState(routeState.page, targetRoomId);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [roomId, user]);
 
   const changeTheme = (t: Theme) => {
     setTheme(t);
@@ -111,6 +214,7 @@ const App: React.FC = () => {
       case 'dashboard': return <DashboardPage navigate={navigate} user={user} onLogout={logout} />;
       case 'lobby': return <RoomLobbyPage navigate={navigate} user={user} roomId={roomId} />;
       case 'arena': return <BattleArenaPage navigate={navigate} user={user} roomId={roomId} />;
+      case 'tournament': return <TournamentPage navigate={navigate} user={user} roomId={roomId} />;
       case 'admin': return <AdminPanelPage navigate={navigate} user={user} roomId={roomId} />;
       case 'results': return <MatchResultsPage navigate={navigate} user={user} roomId={roomId} />;
       case 'theme-settings': return <ThemeSettingsPage navigate={navigate} />;

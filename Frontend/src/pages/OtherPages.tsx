@@ -1,10 +1,11 @@
 // pages/AdminPanelPage.tsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { Page } from '../App';
 import type { User } from '../context/contexts';
-import { adminApi, tasksApi, roomsApi, matchesApi, submissionsApi, matchApi, createRoomWS } from '../api';
+import { adminApi, tasksApi, roomsApi, matchesApi, submissionsApi, matchApi } from '../api';
 import type { Submission, Task, LeaderboardEntry, MatchResult, Room, Match, WSEvent } from '../api';
 import { Award, Crown } from 'lucide-react';
+import { useRoomWebSocket } from '../hooks/useRoomWebSocket';
 
 interface Props {
   navigate: (p: Page, roomId?: string | number) => void;
@@ -12,7 +13,18 @@ interface Props {
   roomId: string | null;
 }
 
+const normalizeRoomId = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  return /^\d+$/.test(text) ? text : null;
+};
 
+const getRoomIdFromLocation = () => {
+  const queryRoomId = normalizeRoomId(new URLSearchParams(window.location.search).get('roomId'));
+  if (queryRoomId) return queryRoomId;
+
+  const roomPathMatch = window.location.pathname.match(/\/rooms\/(\d+)/);
+  return normalizeRoomId(roomPathMatch?.[1]);
+};
 
 export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId }) => {
   const [room, setRoom] = useState<Room | null>(null);
@@ -40,7 +52,6 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
   const [taskCreateError, setTaskCreateError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const socketRef = useRef<WebSocket | null>(null);
 
   const isAdmin =
     room?.creator?.id !== undefined &&
@@ -155,6 +166,16 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
     }
   }, [matchId, navigate, refresh, roomId]);
 
+  useRoomWebSocket(
+    roomId,
+    _user?.token,
+    {
+      onMessage: handleWSEvent,
+      onForbidden: () => setError('Realtime room access denied.'),
+    },
+    { enabled: Boolean(roomId && matchId) },
+  );
+
   useEffect(() => {
     if (!roomId) return;
     refresh();
@@ -169,37 +190,6 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
     }
     matchesApi.get(matchId).then(setMatchData).catch(() => {});
   }, [matchId]);
-
-  useEffect(() => {
-    if (!roomId || !_user?.token || !matchId) {
-      socketRef.current?.close();
-      socketRef.current = null;
-      return;
-    }
-
-    const socket = createRoomWS(roomId, _user.token);
-    socketRef.current = socket;
-    socket.onmessage = (e) => {
-      try {
-        const event: WSEvent = JSON.parse(e.data);
-        handleWSEvent(event);
-      } catch {
-        // ignore malformed payloads
-      }
-    };
-    socket.onclose = (e) => {
-      if (e.code === 4401) {
-        try { window.dispatchEvent(new CustomEvent('cz_auth_invalid')); } catch {}
-      }
-    };
-
-    return () => {
-      socket.close();
-      if (socketRef.current === socket) {
-        socketRef.current = null;
-      }
-    };
-  }, [roomId, _user?.token, matchId, handleWSEvent]);
 
   const handleAccept = async (sub: Submission) => {
     try {
@@ -223,12 +213,33 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
     setSelectedSub(null);
   };
 
+  const resolveLobbyRoomId = () =>
+    normalizeRoomId(roomId) ??
+    normalizeRoomId(room?.id) ??
+    normalizeRoomId(matchData?.room) ??
+    getRoomIdFromLocation() ??
+    normalizeRoomId(localStorage.getItem('cz_room_id'));
+
+  const handleLobbyClick = (e?: React.MouseEvent<HTMLButtonElement>) => {
+    e?.preventDefault();
+    console.log('LOBBY CLICK');
+    const targetRoomId = resolveLobbyRoomId();
+    if (!targetRoomId) {
+      console.warn('Room ID not found, redirecting to dashboard');
+      console.log('[admin-nav] destination', { page: 'dashboard' });
+      navigate('dashboard');
+      return;
+    }
+    console.log('[admin-nav] destination', { page: 'lobby', roomId: targetRoomId });
+    navigate('lobby', targetRoomId);
+  };
+
   if (room && !isAdmin) {
     return (
       <div className="page" style={{ minHeight: '100vh', padding: 24 }}>
         <div style={{ maxWidth: 760, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('lobby', roomId || undefined)}>← LOBBY</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={handleLobbyClick}>← LOBBY</button>
           </div>
           <div className="card" style={{ borderColor: 'var(--danger)' }}>
             <div className="label" style={{ color: 'var(--danger)', marginBottom: 6 }}>NO ACCESS</div>
@@ -381,7 +392,7 @@ export const AdminPanelPage: React.FC<Props> = ({ navigate, user: _user, roomId 
       <nav className="navbar">
         <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => navigate('lobby', roomId || undefined)}>← LOBBY</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={handleLobbyClick}>← LOBBY</button>
             <span style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, letterSpacing: 3, color: 'var(--accent)' }}>
               ADMIN PANEL
             </span>
